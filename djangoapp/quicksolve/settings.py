@@ -38,6 +38,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # apps
+    'main_page',
+    'user_profile',
     # allauth
     'allauth',
     'allauth.account',
@@ -61,13 +64,15 @@ ROOT_URLCONF = 'quicksolve.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'templates'), os.path.join(BASE_DIR, 'templates', 'allauth'),],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
+                'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'main_page.context_processors.user_profile',
             ],
         },
     },
@@ -81,12 +86,12 @@ WSGI_APPLICATION = 'quicksolve.wsgi.application'
 
 DATABASES = {
     "default": {
-        "ENGINE": os.environ.get("SQL_ENGINE", "django.db.backends.sqlite3"),
-        "NAME": os.environ.get("SQL_DATABASE", BASE_DIR / "db.sqlite3"),
-        "USER": os.environ.get("SQL_USER", "root"),
-        "PASSWORD": os.environ.get("SQL_PASSWORD", "admin"),
-        "HOST": os.environ.get("SQL_HOST", "localhost"),
-        "PORT": os.environ.get("SQL_PORT", "5432"),
+        "ENGINE": os.environ.get("SQL_ENGINE"),
+        "NAME": os.environ.get("SQL_DATABASE"),
+        "USER": os.environ.get("SQL_USER"),
+        "PASSWORD": os.environ.get("SQL_PASSWORD"),
+        "HOST": os.environ.get("SQL_HOST"),
+        "PORT": os.environ.get("SQL_PORT"),
     }
 }
 
@@ -156,6 +161,10 @@ SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
 SOCIALACCOUNT_EMAIL_REQUIRED = False
 SOCIALACCOUNT_AUTO_SIGNUP = False
 
+SOCIALACCOUNT_FORMS = {
+    "signup": "user_profiles.forms.CustomSignupForm",
+}
+
 ACCOUNT_AUTHENTICATION_METHOD = 'username_email'
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
@@ -168,6 +177,9 @@ ACCOUNT_LOGOUT_ON_GET = True
 LOGIN_URL = '/account/login/'
 LOGIN_REDIRECT_URL = '/'
 ACCOUNT_LOGOUT_REDIRECT_URL = '/'
+ACCOUNT_EMAIL_CONFIRMATION_REDIRECT_URL = '/account/login/'
+ACCOUNT_EMAIL_CONFIRMATION_AUTHENTICATED_REDIRECT_URL = '/account/login/'
+ACCOUNT_SIGNUP_REDIRECT_URL = '/account/login/'
 
 EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND")
 EMAIL_HOST = os.environ.get("EMAIL_HOST")
