@@ -1,0 +1,40 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>{% block title %}{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <link rel="shortcut icon" href="{%  static 'favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'css/layout.css' %}">
+    {% block head %}{% endblock %}
+</head>
+<body style="font-family: Geologica;">
+    <div class="no_select">
+        <div class="layout_header">
+            <div class="logotype">
+                <a href="/">
+                    main
+                </a>
+            </div>
+
+                {% if user.is_authenticated %}
+                    <p>{{ user.username }}</p>
+                {% endif %}
+                        
+            </div>
+        </div>
+    </div>
+
+    <div class="scrollable-container">
+        <div class="layout_central_block" id="page-content">
+            {% block content %}
+            {% endblock %}
+        </div>
+    </div>
+</body>
+</html>

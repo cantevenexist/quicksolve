@@ -1,0 +1,67 @@
+html, body {
+    background-size: 100% 100%;
+    width: 100%;
+    height: 100%;
+    background: white;
+    overflow: hidden;
+    margin: 0;
+    /* Отключение зума на мобильный устройствах */
+    touch-action: manipulation;
+}
+
+.no_select {
+    user-select: none; /* Запрещает выделение текста */
+    -webkit-user-select: none; /* Для Safari */
+    -moz-user-select: none; /* Для Firefox */
+    -ms-user-select: none; /* Для IE/Edge */
+}
+
+.selectable {
+    user-select: auto; /* Разрешает стандартное поведение выделения */
+    -webkit-user-select: auto; /* Для Safari */
+    -moz-user-select: auto; /* Для Firefox */
+    -ms-user-select: auto; /* Для IE/Edge */
+}    
+
+a {width: fit-content;max-width: 100%;}
+p {margin: 0;}
+
+.scrollable-container {
+    overflow-y: scroll; /* Позволяем прокрутку только для этого контейнера */
+    position: relative;
+    top:50px;
+    height: calc(100% - 50px); /* Высота без шапки */
+}
+/* Для Chrome, Safari и Edge */
+.scrollable-container::-webkit-scrollbar {
+    width: 8px; /* Ширина ползунка */
+    height: 8px; /* Высота ползунка */
+}
+
+.scrollable-container::-webkit-scrollbar-track {
+    background: transparent; /* Цвет фона ползунка */
+}
+
+.scrollable-container::-webkit-scrollbar-thumb {
+    background: cornflowerblue; /* Цвет самого ползунка */
+    border-radius: 4px; /* Скругленные углы ползунка */
+}
+
+@media (hover:hover) {.scrollable-container::-webkit-scrollbar-thumb:hover {
+    background: #6B8BC4; /* Цвет ползунка при наведении */
+}}
+
+.scrollable-container::-webkit-scrollbar-thumb:active {
+    background: #5B7DAC; /* Цвет ползунка при активном взаимодействии */
+}
+
+:focus-visible {
+    outline: 1px solid black; /* Цвет и размер обводки фокуса при нажатии Tab */
+    border-radius: 2px / 2px 
+}
+
+.layout_header {
+    width: 100%;
+    height: 50px;
+    position: fixed;
+}

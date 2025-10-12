@@ -1,0 +1,38 @@
+{% load i18n %}
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Istok+Web:ital,wght@1,700&family=Marmelad&family=Rubik+Mono+One&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Geologica:wght@100..900&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="{% static 'allauth/css/base.css' %}">
+    <link rel="shortcut icon" href="{%  static 'favicon.ico' %}">
+    <title>
+        {% block head_title %}
+        {% endblock head_title %}
+    </title>
+    {% block extra_head %}
+    {% endblock extra_head %}
+</head>
+<body>
+
+<a href="/">
+    logo
+</a>
+{% block body %}
+    {% block content %}
+    {% endblock content %}
+{% endblock body %}
+{% block extra_body %}
+{% endblock extra_body %}
+
+<script src="{% static 'allauth/js/base.js' %}"></script>
+
+</body>
+</html>
