@@ -1,0 +1,21 @@
+{% extends 'layout.html' %}
+{% block content %}<h1>Мои рабочие области</h1>
+
+
+<h2>Список рабочих областей:</h2>
+<a href="{% url 'workspace:workspace_create' %}">Создать рабочую область</a>
+{% if workspaces %}
+    <ul>
+    {% for workspace in workspaces %}
+        <li>
+            <a href="{% url 'workspace:workspace_detail' workspace.url_hash %}">
+                {{ workspace.name }}
+            </a>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>У вас нет рабочих областей</p>
+{% endif %}
+
+{% endblock %}

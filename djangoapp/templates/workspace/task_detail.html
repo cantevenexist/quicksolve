@@ -1,0 +1,25 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h1>{{ task.title }}</h1>
+
+<p><strong>Статус:</strong> {{ task.get_status_display }}</p>
+<p><strong>Описание:</strong> {{ task.description|default:"Нет описания" }}</p>
+
+{% if task.team %}
+    <p><strong>Команда:</strong> 
+        <a href="{% url 'workspace:team_detail' workspace.url_hash task.team.url_hash %}">
+            {{ task.team.name }}
+        </a>
+    </p>
+{% endif %}
+
+{% if task.assignee %}
+    <p><strong>Исполнитель:</strong> {{ task.assignee.username }}</p>
+{% endif %}
+
+<p><strong>Автор:</strong> {{ task.reporter.username }}</p>
+<p><strong>Создана:</strong> {{ task.created_at }}</p>
+
+<a href="{% url 'workspace:task_list' workspace.url_hash %}">Назад к списку задач</a>
+
+{% endblock %}

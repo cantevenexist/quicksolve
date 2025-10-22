@@ -1,0 +1,42 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h1>Задачи в {{ workspace.name }}</h1>
+
+<h2>Фильтр по командам:</h2>
+<form method="get">
+    <select name="team" onchange="this.form.submit()">
+        <option value="">Все команды</option>
+        {% for team in teams %}
+            <option value="{{ team.url_hash }}" 
+                {% if selected_team and selected_team.url_hash == team.url_hash %}selected{% endif %}>
+                {{ team.name }}
+            </option>
+        {% endfor %}
+    </select>
+</form>
+
+<a href="{% url 'workspace:task_create' workspace.url_hash %}">Создать задачу</a>
+
+{% if tasks %}
+    <ul>
+    {% for task in tasks %}
+        <li>
+            <a href="{% url 'workspace:task_detail' workspace.url_hash task.url_hash %}">
+                {{ task.title }} ({{ task.get_status_display }})
+            </a>
+            {% if task.team %}
+            - 
+            <a href="{% url 'workspace:team_detail' workspace.url_hash task.team.url_hash %}">
+                {{ task.team.name }}
+            </a>
+            {% endif %}
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>Нет задач</p>
+{% endif %}
+
+<a href="{% url 'workspace:workspace_detail' workspace.url_hash %}">Назад к рабочей области</a>
+
+{% endblock %}

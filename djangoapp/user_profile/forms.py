@@ -4,16 +4,14 @@ from allauth.socialaccount.forms import SignupForm
 from django.conf import settings
 from django.contrib.auth.models import User
 
-
-class ProfileForm(forms.ModelForm):
+class UserProfileForm(forms.ModelForm):
     class Meta:
         model = UserProfile
-        fields = ['about_me',]
+        fields = ['about_me']  # добавьте другие поля по необходимости
         widgets = {
-            'about_me': forms.TextInput(attrs={'readonly': 'readonly'}),
+            'about_me': forms.Textarea(attrs={'rows': 4,'class': 'form-control','placeholder': 'Tell us about yourself...'}),
         }
-
-
+        
 class CustomSignupForm(SignupForm):
     username = forms.CharField(label="Username")
 

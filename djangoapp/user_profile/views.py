@@ -1,38 +1,60 @@
-from django.shortcuts import get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.views import View
-from django.http import HttpResponse
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib import messages
 from .models import User, UserProfile
+from .forms import UserProfileForm
 
 
-class IndexView(View):
+class MyProfileView(LoginRequiredMixin, View):
     def get(self, request):
-        users = User.objects.all()
-        
-        html = "all users"
-        html += "<div><a href='/'>mainpage</a></div>"
-        for user in users:
-            html += f"<li><a href='/profile/{user.username}/'>{user.username}</a></li>"
-        return HttpResponse(html)
-    
+        return redirect('profile', username=request.user.username)
+
 
 class ProfileView(View):
+    template_name = 'profile/profile.html'
+    
     def get(self, request, username):
         user = get_object_or_404(User, username=username)
         user_profile = get_object_or_404(UserProfile, user=user)
         
-        # Проверка, является ли пользователь владельцем профиля
         is_owner = request.user.is_authenticated and request.user == user
         
-        response_content = (
-            f"Username: {user.username}<br>"
-            f"About me: {user_profile.about_me}<br>"
-        )
+        context = {
+            'profile_user': user,
+            'user_profile': user_profile,
+            'is_owner': is_owner,
+        }
         
-        # Добавляем информацию о владельце и дополнительные возможности
-        if is_owner:
-            response_content += "<div><a href='/'>mainpage</a></div>""This is your profile! You can edit it."
-            # Здесь можно добавить ссылки для редактирования и т.д.
-        else:
-            response_content += "<div><a href='/'>mainpage</a></div>"f"This is {user.username}'s profile"
+        return render(request, self.template_name, context)
+
+
+class ProfileEditView(LoginRequiredMixin, View):
+    template_name = 'profile/profile_edit.html'
+    
+    def get(self, request):
+        user_profile = get_object_or_404(UserProfile, user=request.user)
+        form = UserProfileForm(instance=user_profile)
         
-        return HttpResponse(response_content)
+        context = {
+            'form': form,
+            'profile_user': request.user,
+        }
+        
+        return render(request, self.template_name, context)
+    
+    def post(self, request):
+        user_profile = get_object_or_404(UserProfile, user=request.user)
+        form = UserProfileForm(request.POST, instance=user_profile)
+        
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Profile updated successfully!")
+            return redirect('profile', username=request.user.username)
+        
+        context = {
+            'form': form,
+            'profile_user': request.user,
+        }
+        
+        return render(request, self.template_name, context)

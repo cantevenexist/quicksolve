@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path('profile/', views.IndexView.as_view(), name='profile_list'),
+    path('profile/', views.MyProfileView.as_view(), name='profile_self'),
     path('profile/<str:username>/', views.ProfileView.as_view(), name='profile'),
+    path('account/settings/edit_profile/', views.ProfileEditView.as_view(), name='profile_edit'),
 ]

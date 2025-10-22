@@ -1,0 +1,20 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<h1>{{ profile_user.username }}'s Profile</h1>
+
+<div >
+    <p><strong>Username:</strong> {{ profile_user.username }}</p>
+    {% if user_profile.about_me %}<p><strong>About me:</strong> {{ user_profile.about_me }}</p>{% endif %}
+</div>
+
+<div>
+    {% if is_owner %}
+        <a href="{% url 'profile_edit' %}" >Edit Profile</a>
+        <p>This is your profile! You can edit it.</p>
+    {% else %}
+        <p>This is {{ profile_user.username }}'s profile</p>
+    {% endif %}
+</div>
+
+{% endblock %}

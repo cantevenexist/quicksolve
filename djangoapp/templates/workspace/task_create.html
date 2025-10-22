@@ -1,0 +1,15 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<h1>Создать задачу в {{ workspace.name }}</h1>
+    
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Создать</button>
+</form>
+
+<a href="{% url 'workspace:task_list' workspace.url_hash %}">Назад к списку задач</a>
+
+{% endblock %}
+    

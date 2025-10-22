@@ -15,18 +15,22 @@
 </head>
 <body style="font-family: Geologica;">
     <div class="no_select">
-        <div class="layout_header">
-            <div class="logotype">
-                <a href="/">
-                    main
-                </a>
+        <div class="layout_header" style="display: flex; justify-content: space-between; background-color: rgb(230, 230, 230);">
+            
+            <div style="display: flex; gap: 10px;">
+                <div class="logotype"><a href="/">main</a></div>
+                
+            </div>
+            
+            <div style="display: flex; gap: 10px;">
+                {% if user.is_authenticated %}
+                    <div><a href='/profile/'>{{ user.username }}</a></div>    
+                    <div><a href='/workspace/'>workspace</a></div>
+                {% endif %}
+                <div><a href='/account/login/'>login</a></div>
+                <div><a href='/account/logout/'>logout</a></div>   
             </div>
 
-                {% if user.is_authenticated %}
-                    <p>{{ user.username }}</p>
-                {% endif %}
-                        
-            </div>
         </div>
     </div>
 

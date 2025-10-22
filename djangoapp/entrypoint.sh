@@ -18,4 +18,7 @@ python manage.py migrate
 # Очищение таблиц базы данных Postgre
 # python manage.py flush --no-input
 
+# Создание аккаунта суперпользователя
+sh init_superadmin.sh
+
 exec "$@"

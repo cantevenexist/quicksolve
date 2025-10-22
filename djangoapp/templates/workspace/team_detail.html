@@ -1,0 +1,25 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h1>{{ team.name }}</h1>
+
+<!-- <h2>Задачи команды:</h2> -->
+<a href="{% url 'workspace:task_create' team.workspace.url_hash %}?team={{ team.url_hash }}">Создать задачу для этой команды</a>
+<br>
+<a href="{% url 'workspace:task_list' team.workspace.url_hash %}?team={{ team.url_hash }}">Показать все задачи команды</a>
+<!-- {% if tasks %}
+    <ul>
+    {% for task in tasks %}
+        <li>
+            <a href="{% url 'workspace:task_detail' team.workspace.url_hash task.url_hash %}">
+                {{ task.title }} ({{ task.get_status_display }})
+            </a>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>Нет задач в этой команде</p>
+{% endif %} -->
+<br>
+<a href="{% url 'workspace:workspace_detail' team.workspace.url_hash %}">Назад к рабочей области</a>
+
+{% endblock %}

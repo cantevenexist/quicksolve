@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     # apps
     'main_page',
     'user_profile',
+    'workspace',
     # allauth
     'allauth',
     'allauth.account',
@@ -193,3 +194,5 @@ EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD")
 EMAIL_USE_TLS = int(os.environ.get("EMAIL_USE_TLS", default=1))
+
+ACCOUNT_EMAIL_VERIFICATION = os.environ.get("ACCOUNT_EMAIL_VERIFICATION", default="mandatory")

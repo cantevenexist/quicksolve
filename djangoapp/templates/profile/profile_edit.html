@@ -1,0 +1,26 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<h1>Edit profile</h1>
+<form method="post">
+    {% csrf_token %}
+    
+    <div>
+        <label for="id_username">Username:</label>
+        <input type="text" value="{{ profile_user.username }}"disabled>
+        <small>Now username cannot be changed</small>
+    </div>
+    
+    <div>
+        <label for="id_about_me">About me:</label>
+        {{ form.about_me }}
+        {% if form.about_me.errors %}
+            <div>{{ form.about_me.errors }}</div>
+        {% endif %}
+    </div>
+    
+    <button type="submit" >Save Changes</button>
+    <a href="/profile/">Cancel</a>
+</form>
+
+{% endblock %}

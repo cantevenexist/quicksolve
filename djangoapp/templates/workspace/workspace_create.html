@@ -1,0 +1,14 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<h1>Создать рабочую область</h1>
+
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Создать</button>
+</form>
+
+<a href="{% url 'workspace:workspace_index' %}">Назад к списку</a>
+
+{% endblock %}
