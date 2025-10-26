@@ -2,6 +2,16 @@
 {% block content %}
 <h1>{{ workspace.name }}</h1>
 
+<!-- Кнопка управления -->
+<button onclick="openManagement()">Управление</button>
+
+<!-- Количество участников -->
+<div style="cursor: pointer; color: #666; margin-bottom: 20px;" onclick="openManagementWithMembers()">
+    {% with total_members=workspace.access_users.count|add:1 %}
+        {{ total_members }} участник{{ total_members|pluralize:"ов" }}
+    {% endwith %}
+</div>
+
 <h2>Команды:</h2>
 <a href="{% url 'workspace:team_create' workspace.url_hash %}">Создать команду</a>
 
@@ -23,18 +33,155 @@
 <a href="{% url 'workspace:task_create' workspace.url_hash %}">Создать задачу</a>
 <a href="{% url 'workspace:task_list' workspace.url_hash %}">Все задачи</a>
 
-<!-- {% if tasks %}
-    <ul>
-    {% for task in tasks %}
-        <li>
-            <a href="{% url 'workspace:task_detail' workspace.url_hash task.url_hash %}">
-                {{ task.title }} ({{ task.get_status_display }})
-            </a>
-        </li>
-    {% endfor %}
-    </ul>
-{% else %}
-    <p>Нет задач</p>
-{% endif %} -->
+<!-- Блок управления -->
+<div id="managementBlock" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1000; width: 80%; max-width: 800px;">
+    <!-- Крестик закрытия -->
+    <h2>Управление</h2>
+    <div style="position: absolute; top: 10px; right: 10px; cursor: pointer;" onclick="closeManagement()">
+        ✕
+    </div>
+    
+    <div style="display: flex;">
+        <!-- Левая часть - навигация -->
+        <div style="width: 30%; border-right: 1px solid #ccc; padding-right: 20px;">
+            <div id="navMain" style="cursor: pointer; padding: 10px; background: #f0f0f0;" onclick="showContent('main')">Главное</div>
+            <div id="navMembers" style="cursor: pointer; padding: 10px;" onclick="showContent('members')">Участники</div>
+            <div id="navAdmin" style="cursor: pointer; padding: 10px;" onclick="showContent('admin')">Администрирование</div>
+        </div>
+        
+        <!-- Правая часть - контент -->
+        <div style="width: 70%; padding-left: 20px;">
+            <!-- Контент для "Главное" -->
+            <div id="contentMain" style="display: block;">
+                <h3>Основные настройки</h3>
+                <form>
+                    <div>
+                        <label>Название:</label>
+                        <input type="text" value="{{ workspace.name }}" style="width: 100%; margin-bottom: 10px;">
+                    </div>
+                    <div>
+                        <label>Описание:</label>
+                        <textarea style="width: 100%; height: 100px; margin-bottom: 10px;">{{ workspace.description|default:'' }}</textarea>
+                    </div>
+                    <button type="button">Сохранить</button>
+                </form>
+            </div>
+            
+            <!-- Контент для "Участники" -->
+            <div id="contentMembers" style="display: none;">
+            <h3>Участники рабочей области</h3>
+            
+            <!-- Массовое приглашение -->
+            <div style="margin-bottom: 20px;">
+                <h4>Массовое приглашение</h4>
+                <form method="post">
+                    {% csrf_token %}
+                    <div>
+                        <label>Срок действия (часы):</label>
+                        <input type="number" name="expires_hours" value="24" min="1" max="168">
+                    </div>
+                    <div>
+                        <label>Максимум использований:</label>
+                        <input type="number" name="max_uses" value="10" min="1" max="100">
+                    </div>
+                    <button type="submit" name="create_mass_invitation">Создать ссылку</button>
+                </form>
+            </div>
+            
+            <!-- Точечное приглашение -->
+            <div style="margin-bottom: 20px;">
+                <h4>Точечное приглашение</h4>
+                <form method="post">
+                    {% csrf_token %}
+                    <div>
+                        <textarea name="users_input" placeholder="user1@example.com UNIQUE_CODE user2@example.com" style="width: 100%; height: 60px;"></textarea>
+                    </div>
+                    <button type="submit" name="create_point_invitations">Отправить приглашения</button>
+                </form>
+            </div>
+            
+            <!-- Активные приглашения -->
+            <div>
+                <h4>Активные приглашения</h4>
+                {% for invitation in active_invitations %}
+                    <div style="border: 1px solid #ccc; padding: 10px; margin: 5px 0;">
+                        <p>Ссылка: {{ request.scheme }}://{{ request.get_host }}{% url 'workspace:accept_invitation' invitation.token %}</p>
+                        <p>Истекает: {{ invitation.expires_at }}</p>
+                        <p>Использовано: {{ invitation.used_count }}/{{ invitation.max_uses }}</p>
+                        <form method="post" style="display: inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="invitation_id" value="{{ invitation.id }}">
+                            <button type="submit" name="deactivate_invitation">Отключить</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+            
+            <!-- Список участников -->
+            <h4>Текущие участники</h4>
+            <ul>
+                <li><strong>{{ workspace.user.username }}</strong> (Создатель)</li>
+                {% for member in workspace.access_users.all %}
+                    <li>{{ member.username }} (Участник)</li>
+                {% empty %}
+                    <li>Нет других участников</li>
+                {% endfor %}
+            </ul>
+        </div>
+            
+            <!-- Контент для "Администрирование" -->
+            <div id="contentAdmin" style="display: none;">
+                <h3>Администраторы</h3>
+                <ul>
+                    <li><strong>{{ workspace.user.username }}</strong> (Главный администратор)</li>
+                    {% for admin in workspace.access_users.all %}
+                        <li>{{ admin.username }} (Администратор)</li>
+                    {% empty %}
+                        <li>Нет других администраторов</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function openManagement() {
+    document.getElementById('managementBlock').style.display = 'block';
+}
+
+function openManagementWithMembers() {
+    document.getElementById('managementBlock').style.display = 'block';
+    showContent('members');
+}
+
+function closeManagement() {
+    document.getElementById('managementBlock').style.display = 'none';
+}
+
+function showContent(section) {
+    // Скрываем весь контент
+    document.getElementById('contentMain').style.display = 'none';
+    document.getElementById('contentMembers').style.display = 'none';
+    document.getElementById('contentAdmin').style.display = 'none';
+    
+    // Сбрасываем фон у всех пунктов навигации
+    document.getElementById('navMain').style.background = '';
+    document.getElementById('navMembers').style.background = '';
+    document.getElementById('navAdmin').style.background = '';
+    
+    // Показываем выбранный контент и подсвечиваем активный пункт
+    if (section === 'main') {
+        document.getElementById('contentMain').style.display = 'block';
+        document.getElementById('navMain').style.background = '#f0f0f0';
+    } else if (section === 'members') {
+        document.getElementById('contentMembers').style.display = 'block';
+        document.getElementById('navMembers').style.background = '#f0f0f0';
+    } else if (section === 'admin') {
+        document.getElementById('contentAdmin').style.display = 'block';
+        document.getElementById('navAdmin').style.background = '#f0f0f0';
+    }
+}
+</script>
 
 {% endblock %}

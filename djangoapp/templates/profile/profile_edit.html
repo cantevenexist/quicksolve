@@ -7,7 +7,7 @@
     
     <div>
         <label for="id_username">Username:</label>
-        <input type="text" value="{{ profile_user.username }}"disabled>
+        <input type="text" value="{{ user_profile.user }}" disabled>
         <small>Now username cannot be changed</small>
     </div>
     
@@ -19,8 +19,43 @@
         {% endif %}
     </div>
     
-    <button type="submit" >Save Changes</button>
+    <div>
+        <label>Unique Code:</label>
+        <input type="text" id="unique-code-display" value="{{ user_profile.unique_code }}" readonly>
+        <button type="button" id="regenerate-code-btn">Update Code</button>
+        <small>Old code will become invalid when updated</small>
+    </div>
+    
+    <button type="submit">Save Changes</button>
     <a href="/profile/">Cancel</a>
 </form>
+
+<script>
+document.getElementById('regenerate-code-btn').addEventListener('click', function() {
+    if (confirm('Are you sure you want to update the code? The old code will become invalid!')) {
+        fetch('/account/regenerate_code/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'X-Requested-With': 'XMLHttpRequest', // Добавляем заголовок для проверки
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Обновляем отображаемый код
+                document.getElementById('unique-code-display').value = data.new_code;
+                alert('Code successfully updated!');
+            } else {
+                alert(data.error || 'Error updating code');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error updating code');
+        });
+    }
+});
+</script>
 
 {% endblock %}

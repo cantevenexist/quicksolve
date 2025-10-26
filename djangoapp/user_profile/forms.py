@@ -5,12 +5,31 @@ from django.conf import settings
 from django.contrib.auth.models import User
 
 class UserProfileForm(forms.ModelForm):
+    unique_code = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Ваш уникальный код',
+            'readonly': 'readonly'  # Делаем поле только для чтения
+        }),
+        help_text="Этот код можно использовать только один раз. При обновлении старый код станет недействительным."
+    )
+    
     class Meta:
         model = UserProfile
-        fields = ['about_me']  # добавьте другие поля по необходимости
+        fields = ['about_me', 'unique_code']
         widgets = {
-            'about_me': forms.Textarea(attrs={'rows': 4,'class': 'form-control','placeholder': 'Tell us about yourself...'}),
+            'about_me': forms.Textarea(attrs={
+                'rows': 4,
+                'class': 'form-control',
+                'placeholder': 'Tell us about yourself...'
+            }),
         }
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Делаем поле уникального кода недоступным для прямого редактирования
+        self.fields['unique_code'].widget.attrs['readonly'] = True
         
 class CustomSignupForm(SignupForm):
     username = forms.CharField(label="Username")
