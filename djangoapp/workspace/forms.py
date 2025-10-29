@@ -106,3 +106,41 @@ class TaskCreateForm(forms.ModelForm):
                 )
         
         return cleaned_data
+
+
+class MassInvitationForm(forms.Form):
+    """Форма для массового приглашения"""
+    
+    expiration_time = forms.ChoiceField(
+        choices=Workspace.DURATION_CHOICES,
+        required=False,
+        widget=forms.Select(attrs={
+            'class': 'form-control',
+            'id': 'expiration-time'
+        }),
+        label='Срок действия'
+    )
+    
+    max_uses = forms.IntegerField(
+        required=False,
+        min_value=1,
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Оставьте пустым для безграничного использования',
+            'min': 1
+        }),
+        label='Максимум использований'
+    )
+
+
+class IndividualInvitationForm(forms.Form):
+    """Форма для точечного приглашения"""
+    
+    identifiers = forms.CharField(
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Введите почты или уникальные коды через пробел',
+            'id': 'identifiers-input'
+        }),
+        label='Почты или коды пользователей'
+    )

@@ -2,9 +2,6 @@
 {% block content %}
 <h1>{{ workspace.name }}</h1>
 
-<!-- Кнопка управления -->
-<button onclick="openManagement()">Управление</button>
-
 <!-- Количество участников -->
 <div style="cursor: pointer; color: #666; margin-bottom: 20px;" onclick="openManagementWithMembers()">
     {% with total_members=workspace.access_users.count|add:1 %}
@@ -12,6 +9,7 @@
     {% endwith %}
 </div>
 
+<!-- Команды -->
 <h2>Команды:</h2>
 <a href="{% url 'workspace:team_create' workspace.url_hash %}">Создать команду</a>
 
@@ -29,29 +27,29 @@
     <p>Нет команд</p>
 {% endif %}
 
+<!-- Задачи -->
 <h2>Задачи:</h2>
 <a href="{% url 'workspace:task_create' workspace.url_hash %}">Создать задачу</a>
 <a href="{% url 'workspace:task_list' workspace.url_hash %}">Все задачи</a>
 
+<!-- Кнопка управления -->
+<button onclick="openManagement()">Управление</button>
+
 <!-- Блок управления -->
 <div id="managementBlock" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1000; width: 80%; max-width: 800px;">
-    <!-- Крестик закрытия -->
-    <h2>Управление</h2>
-    <div style="position: absolute; top: 10px; right: 10px; cursor: pointer;" onclick="closeManagement()">
-        ✕
-    </div>
+    <div style="position: absolute; top: 10px; right: 10px; cursor: pointer;" onclick="closeManagement()">✕</div>
     
     <div style="display: flex;">
-        <!-- Левая часть - навигация -->
+        <!-- Навигация -->
         <div style="width: 30%; border-right: 1px solid #ccc; padding-right: 20px;">
             <div id="navMain" style="cursor: pointer; padding: 10px; background: #f0f0f0;" onclick="showContent('main')">Главное</div>
             <div id="navMembers" style="cursor: pointer; padding: 10px;" onclick="showContent('members')">Участники</div>
             <div id="navAdmin" style="cursor: pointer; padding: 10px;" onclick="showContent('admin')">Администрирование</div>
         </div>
         
-        <!-- Правая часть - контент -->
+        <!-- Контент -->
         <div style="width: 70%; padding-left: 20px;">
-            <!-- Контент для "Главное" -->
+            <!-- Главное -->
             <div id="contentMain" style="display: block;">
                 <h3>Основные настройки</h3>
                 <form>
@@ -67,77 +65,124 @@
                 </form>
             </div>
             
-            <!-- Контент для "Участники" -->
+            <!-- Участники -->
             <div id="contentMembers" style="display: none;">
-            <h3>Участники рабочей области</h3>
-            
-            <!-- Массовое приглашение -->
-            <div style="margin-bottom: 20px;">
-                <h4>Массовое приглашение</h4>
-                <form method="post">
-                    {% csrf_token %}
-                    <div>
-                        <label>Срок действия (часы):</label>
-                        <input type="number" name="expires_hours" value="24" min="1" max="168">
+                <h3>Участники рабочей области</h3>
+                
+                <!-- Текущие участники -->
+                <div style="margin-bottom: 30px;">
+                    <h4>Текущие участники</h4>
+                    <ul>
+                        <li><strong>{{ workspace.user.username }}</strong> (Владелец)</li>
+                        {% for member in workspace.access_users.all %}
+                            <li>{{ member.username }} (Участник)</li>
+                        {% empty %}
+                            <li>Нет других участников</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <!-- Массовое приглашение -->
+                <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+                    <h4>Массовое приглашение</h4>
+                    
+                    {% if mass_invitation_url %}
+                    <div id="existingMassInvitation" style="margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #e9ecef;">
+                        <p style="margin: 0 0 10px 0; font-weight: bold;">
+                            {% if mass_invitation_data.can_be_used %}Текущая активная ссылка:{% else %}Текущая ссылка (неактивна):{% endif %}
+                        </p>
+                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                            <input type="text" id="existingInvitationLink" value="{{ mass_invitation_url }}" readonly 
+                                   style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #fff;">
+                            <button type="button" onclick="copyExistingInvitationLink()" 
+                                    style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+                                Копировать
+                            </button>
+                        </div>
+                        <div style="font-size: 12px; color: #666;">
+                            <div>Срок действия: {{ mass_invitation_data.expiration_time }}</div>
+                            <div>Использований: {{ mass_invitation_data.max_uses }} (текущее: {{ mass_invitation_data.current_uses }})</div>
+                            <div>Статус: <span style="color: {% if mass_invitation_data.can_be_used %}#28a745{% else %}#dc3545{% endif %};">{% if mass_invitation_data.can_be_used %}Активно{% else %}Неактивно{% endif %}</span></div>
+                        </div>
                     </div>
-                    <div>
-                        <label>Максимум использований:</label>
-                        <input type="number" name="max_uses" value="10" min="1" max="100">
+                    {% endif %}
+                    
+                    <form id="massInvitationForm">
+                        {% csrf_token %}
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Срок действия:</label>
+                            <select name="expiration_time" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                                <option value="">Бессрочно</option>
+                                <option value="3600">1 час</option>
+                                <option value="14400">4 часа</option>
+                                <option value="86400">24 часа</option>
+                                <option value="172800">48 часов</option>
+                                <option value="259200">72 часа</option>
+                            </select>
+                        </div>
+                        
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Количество использований:</label>
+                            <input type="number" name="max_uses" min="1" placeholder="Оставьте пустым для безграничного использования"
+                                   style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                        </div>
+                        
+                        <button type="button" onclick="createMassInvitation()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+                            {% if mass_invitation_url %}Обновить ссылку{% else %}Создать ссылку{% endif %}
+                        </button>
+                    </form>
+                    
+                    <div id="massInvitationResult" style="margin-top: 15px; display: none;"></div>
+                </div>
+
+                <!-- Точечное приглашение -->
+                <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+                    <h4>Точечное приглашение</h4>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+                        Введите почты или уникальные коды через пробел или Enter
+                    </p>
+                    
+                    <form id="individualInvitationForm">
+                        {% csrf_token %}
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Почты или коды:</label>
+                            <input type="text" id="identifiersInput" 
+                                   placeholder="user1@example.com ABC123 user2@example.com"
+                                   style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            
+                            <div id="identifiersList" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px;"></div>
+                        </div>
+                        
+                        <button type="button" onclick="createIndividualInvitations()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+                            Отправить приглашения
+                        </button>
+                    </form>
+                    
+                    <div id="individualInvitationResult" style="margin-top: 15px; display: none;"></div>
+                </div>
+
+                <!-- Управление приглашениями -->
+                <div style="padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;">
+                    <h4>Управление приглашениями</h4>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <span>Статус массового приглашения:</span>
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="toggleAllInvitations" {% if mass_invitation_data.is_active %}checked{% endif %} onchange="toggleAllInvitations()" style="margin-right: 8px;">
+                            <span>{% if mass_invitation_data.is_active %}Активно{% else %}Неактивно{% endif %}</span>
+                        </label>
                     </div>
-                    <button type="submit" name="create_mass_invitation">Создать ссылку</button>
-                </form>
+                </div>
             </div>
-            
-            <!-- Точечное приглашение -->
-            <div style="margin-bottom: 20px;">
-                <h4>Точечное приглашение</h4>
-                <form method="post">
-                    {% csrf_token %}
-                    <div>
-                        <textarea name="users_input" placeholder="user1@example.com UNIQUE_CODE user2@example.com" style="width: 100%; height: 60px;"></textarea>
-                    </div>
-                    <button type="submit" name="create_point_invitations">Отправить приглашения</button>
-                </form>
-            </div>
-            
-            <!-- Активные приглашения -->
-            <div>
-                <h4>Активные приглашения</h4>
-                {% for invitation in active_invitations %}
-                    <div style="border: 1px solid #ccc; padding: 10px; margin: 5px 0;">
-                        <p>Ссылка: {{ request.scheme }}://{{ request.get_host }}{% url 'workspace:accept_invitation' invitation.token %}</p>
-                        <p>Истекает: {{ invitation.expires_at }}</p>
-                        <p>Использовано: {{ invitation.used_count }}/{{ invitation.max_uses }}</p>
-                        <form method="post" style="display: inline;">
-                            {% csrf_token %}
-                            <input type="hidden" name="invitation_id" value="{{ invitation.id }}">
-                            <button type="submit" name="deactivate_invitation">Отключить</button>
-                        </form>
-                    </div>
-                {% endfor %}
-            </div>
-            
-            <!-- Список участников -->
-            <h4>Текущие участники</h4>
-            <ul>
-                <li><strong>{{ workspace.user.username }}</strong> (Создатель)</li>
-                {% for member in workspace.access_users.all %}
-                    <li>{{ member.username }} (Участник)</li>
-                {% empty %}
-                    <li>Нет других участников</li>
-                {% endfor %}
-            </ul>
-        </div>
-            
-            <!-- Контент для "Администрирование" -->
+
+            <!-- Администрирование -->
             <div id="contentAdmin" style="display: none;">
                 <h3>Администраторы</h3>
                 <ul>
-                    <li><strong>{{ workspace.user.username }}</strong> (Главный администратор)</li>
-                    {% for admin in workspace.access_users.all %}
-                        <li>{{ admin.username }} (Администратор)</li>
+                    <li><strong>{{ workspace.user.username }}</strong> (Владелец)</li>
+                    {% for member in workspace.access_users.all %}
+                        <li>{{ member.username }} (Участник)</li>
                     {% empty %}
-                        <li>Нет других администраторов</li>
+                        <li>Нет других участников</li>
                     {% endfor %}
                 </ul>
             </div>
@@ -146,6 +191,7 @@
 </div>
 
 <script>
+// Управление модальным окном
 function openManagement() {
     document.getElementById('managementBlock').style.display = 'block';
 }
@@ -160,27 +206,195 @@ function closeManagement() {
 }
 
 function showContent(section) {
-    // Скрываем весь контент
-    document.getElementById('contentMain').style.display = 'none';
-    document.getElementById('contentMembers').style.display = 'none';
-    document.getElementById('contentAdmin').style.display = 'none';
+    document.querySelectorAll('[id^="content"]').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('[id^="nav"]').forEach(el => el.style.background = '');
     
-    // Сбрасываем фон у всех пунктов навигации
-    document.getElementById('navMain').style.background = '';
-    document.getElementById('navMembers').style.background = '';
-    document.getElementById('navAdmin').style.background = '';
+    const contentElement = document.getElementById(`content${section.charAt(0).toUpperCase() + section.slice(1)}`);
+    contentElement.style.display = 'block';
+    document.getElementById(`nav${section.charAt(0).toUpperCase() + section.slice(1)}`).style.background = '#f0f0f0';
     
-    // Показываем выбранный контент и подсвечиваем активный пункт
-    if (section === 'main') {
-        document.getElementById('contentMain').style.display = 'block';
-        document.getElementById('navMain').style.background = '#f0f0f0';
-    } else if (section === 'members') {
-        document.getElementById('contentMembers').style.display = 'block';
-        document.getElementById('navMembers').style.background = '#f0f0f0';
-    } else if (section === 'admin') {
-        document.getElementById('contentAdmin').style.display = 'block';
-        document.getElementById('navAdmin').style.background = '#f0f0f0';
+    if (section === 'members') initMembersSection();
+}
+
+// Массовое приглашение
+function createMassInvitation() {
+    const form = document.getElementById('massInvitationForm');
+    const formData = new FormData(form);
+    
+    fetch(`{% url 'workspace:create_mass_invitation' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(response => response.json())
+    .then(data => {
+        const resultDiv = document.getElementById('massInvitationResult');
+        
+        if (data.success) {
+            let existingDiv = document.getElementById('existingMassInvitation');
+            if (!existingDiv) {
+                existingDiv = document.createElement('div');
+                existingDiv.id = 'existingMassInvitation';
+                existingDiv.style.cssText = 'margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #e9ecef;';
+                form.parentNode.insertBefore(existingDiv, form);
+            }
+            
+            existingDiv.innerHTML = `
+                <p style="margin: 0 0 10px 0; font-weight: bold; color: #155724;">✅ Новая активная ссылка:</p>
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <input type="text" id="existingInvitationLink" value="${data.invitation_url}" readonly style="flex: 1; padding: 8px; border: 1px solid #28a745; border-radius: 4px; background: #fff;">
+                    <button type="button" onclick="copyExistingInvitationLink()" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">Копировать</button>
+                </div>
+                <div style="font-size: 12px; color: #155724;">
+                    <div>Срок действия: ${data.expiration_time}</div>
+                    <div>Использований: ${data.max_uses} (текущее: ${data.current_uses})</div>
+                    <div>Статус: <span style="color: #28a745;">Активно</span></div>
+                </div>
+            `;
+            
+            document.querySelector('#massInvitationForm button').textContent = 'Обновить ссылку';
+            document.getElementById('toggleAllInvitations').checked = true;
+            document.querySelector('#toggleAllInvitations + span').textContent = 'Активно';
+            
+            resultDiv.innerHTML = '<div style="color: #155724; background: #d4edda; padding: 10px; border-radius: 4px; border: 1px solid #c3e6cb;">✅ Создана новая ссылка приглашения</div>';
+            resultDiv.style.display = 'block';
+            setTimeout(() => resultDiv.style.display = 'none', 3000);
+        } else {
+            resultDiv.innerHTML = `<div style="color: #721c24; background: #f8d7da; padding: 10px; border-radius: 4px; border: 1px solid #f5c6cb;">❌ Ошибка: ${data.errors ? Object.values(data.errors).join(', ') : (data.error || 'Неизвестная ошибка')}</div>`;
+            resultDiv.style.display = 'block';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('massInvitationResult').innerHTML = '<div style="color: #721c24; background: #f8d7da; padding: 10px; border-radius: 4px; border: 1px solid #f5c6cb;">❌ Ошибка при создании приглашения</div>';
+        document.getElementById('massInvitationResult').style.display = 'block';
+    });
+}
+
+function copyExistingInvitationLink() {
+    const linkInput = document.getElementById('existingInvitationLink');
+    linkInput.select();
+    document.execCommand('copy');
+    const button = event.target;
+    button.textContent = 'Скопировано!';
+    setTimeout(() => button.textContent = 'Копировать', 2000);
+}
+
+// Точечное приглашение
+let tempIdentifiers = [];
+
+// Обработка ввода - работает на пробел и Enter
+document.getElementById('identifiersInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        const identifier = this.value.trim();
+        if (identifier && !tempIdentifiers.includes(identifier)) {
+            tempIdentifiers.push(identifier);
+            updateIdentifiersList();
+        }
+        this.value = '';
     }
+});
+
+// Также обрабатываем ввод для пробела в конце
+document.getElementById('identifiersInput').addEventListener('input', function(e) {
+    const value = this.value.trim();
+    if (value.endsWith(' ')) {
+        const identifier = value.slice(0, -1).trim();
+        if (identifier && !tempIdentifiers.includes(identifier)) {
+            tempIdentifiers.push(identifier);
+            updateIdentifiersList();
+        }
+        this.value = '';
+    }
+});
+
+function updateIdentifiersList() {
+    const listDiv = document.getElementById('identifiersList');
+    listDiv.innerHTML = '';
+    
+    tempIdentifiers.forEach((identifier, index) => {
+        const badge = document.createElement('div');
+        badge.style.cssText = 'background: #007bff; color: white; padding: 5px 10px; border-radius: 15px; font-size: 12px; display: flex; align-items: center; gap: 5px; margin: 2px;';
+        badge.innerHTML = `${identifier} <span style="cursor: pointer; font-weight: bold;" onclick="removeIdentifier(${index})">×</span>`;
+        listDiv.appendChild(badge);
+    });
+}
+
+function removeIdentifier(index) {
+    tempIdentifiers.splice(index, 1);
+    updateIdentifiersList();
+}
+
+function createIndividualInvitations() {
+    if (tempIdentifiers.length === 0) {
+        alert('Добавьте хотя бы один email или код пользователя');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('identifiers', tempIdentifiers.join(' '));
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    fetch(`{% url 'workspace:create_individual_invitations' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(response => response.json())
+    .then(data => {
+        const resultDiv = document.getElementById('individualInvitationResult');
+        
+        if (data.success) {
+            resultDiv.innerHTML = `<div style="color: #28a745; background: #d4edda; padding: 10px; border-radius: 4px; border: 1px solid #c3e6cb;">✅ Отправлено ${data.created_count} приглашений${data.errors.length > 0 ? '<br>Ошибки: ' + data.errors.join(', ') : ''}</div>`;
+            tempIdentifiers = [];
+            updateIdentifiersList();
+            document.getElementById('identifiersInput').value = '';
+        } else {
+            resultDiv.innerHTML = `<div style="color: #721c24; background: #f8d7da; padding: 10px; border-radius: 4px; border: 1px solid #f5c6cb;">❌ Ошибка: ${data.error || 'Неизвестная ошибка'}</div>`;
+        }
+        
+        resultDiv.style.display = 'block';
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при отправке приглашений');
+    });
+}
+
+// Управление приглашениями
+function toggleAllInvitations() {
+    const checkbox = document.getElementById('toggleAllInvitations');
+    const action = checkbox.checked ? 'enable' : 'disable';
+    
+    const formData = new FormData();
+    formData.append('action', action);
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    fetch(`{% url 'workspace:toggle_all_invitations' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            document.querySelector('#toggleAllInvitations + span').textContent = checkbox.checked ? 'Активно' : 'Неактивно';
+        } else {
+            alert('Ошибка при изменении статуса');
+            checkbox.checked = !checkbox.checked;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Произошла ошибка');
+        checkbox.checked = !checkbox.checked;
+    });
+}
+
+function initMembersSection() {
+    tempIdentifiers = [];
+    updateIdentifiersList();
 }
 </script>
 

@@ -17,4 +17,10 @@ urlpatterns = [
     path('<str:workspace_url_hash>/tasks/', views.TaskListView.as_view(), name='task_list'),
     path('<str:workspace_url_hash>/task/create/', views.TaskCreateView.as_view(), name='task_create'),
     path('<str:workspace_url_hash>/task/<str:task_url_hash>/', views.TaskDetailView.as_view(), name='task_detail'),
+
+    # === INVITATIONS ===
+    path('<str:workspace_url_hash>/invitations/mass/create/', views.CreateMassInvitationView.as_view(), name='create_mass_invitation'),
+    path('<str:workspace_url_hash>/invitations/individual/create/', views.CreateIndividualInvitationsView.as_view(), name='create_individual_invitations'),
+    path('<str:workspace_url_hash>/invitations/toggle-all/', views.ToggleAllInvitationsView.as_view(), name='toggle_all_invitations'),
+    path('invitations/accept/<str:token>/', views.AcceptInvitationView.as_view(), name='accept_invitation'),
 ]
