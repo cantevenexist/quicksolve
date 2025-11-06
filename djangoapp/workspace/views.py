@@ -10,10 +10,11 @@ from django.utils import timezone
 from django.core.mail import send_mail
 from django.conf import settings
 from django.urls import reverse
-
+from django.contrib.auth import get_user_model
+User = get_user_model()
 from .models import Workspace, Team, Task, IndividualInvitation
 from .forms import WorkspaceCreateForm, TeamCreateForm, TaskCreateForm, MassInvitationForm, IndividualInvitationForm
-from user_profile.models import UserProfile
+from user_profile.models import UserProfile, Notification
 
 
 class WorkspaceIndexView(LoginRequiredMixin, ListView):
@@ -368,32 +369,55 @@ class CreateIndividualInvitationsView(LoginRequiredMixin, View):
         errors = []
         
         for identifier in identifier_list:
-            # Определяем тип идентификатора (email или код)
+            # Определяем тип идентификатора (email или код) и находим пользователя
+            invited_user = None
+            
             if '@' in identifier:
-                # Это email
-                invitation = IndividualInvitation(
-                    workspace=workspace,
-                    created_by=request.user,
-                    email=identifier
-                )
+                # Это email - ищем пользователя по email
+                try:
+                    invited_user = User.objects.get(email=identifier)
+                except User.DoesNotExist:
+                    errors.append(f"Пользователь с email {identifier} не найден")
+                    continue
             else:
-                # Это уникальный код
+                # Это уникальный код - ищем пользователя по коду профиля
                 try:
                     profile = UserProfile.objects.get(unique_code=identifier)
-                    invitation = IndividualInvitation(
-                        workspace=workspace,
-                        created_by=request.user,
-                        unique_code=identifier
-                    )
+                    invited_user = profile.user
                 except UserProfile.DoesNotExist:
                     errors.append(f"Пользователь с кодом {identifier} не найден")
                     continue
             
+            # Проверяем, не приглашен ли уже этот пользователь
+            existing_invitation = IndividualInvitation.objects.filter(
+                workspace=workspace,
+                invited_user=invited_user,
+                status='pending'
+            ).exists()
+            
+            if existing_invitation:
+                errors.append(f"Пользователь {invited_user.email} уже приглашен")
+                continue
+            
+            # Создаем приглашение
+            invitation = IndividualInvitation(
+                workspace=workspace,
+                created_by=request.user,
+                invited_user=invited_user
+            )
+            
             invitation.save()
             created_invitations.append(invitation)
             
-            # Отправляем уведомление
+            # Отправляем уведомление по email
             self.send_invitation_notification(invitation, request)
+            
+            # Создаем уведомление в системе для приглашенного пользователя
+            self.create_system_notification(invitation, request)
+        
+        # Создаем уведомление для создателя приглашений
+        if created_invitations:
+            self.create_creator_notification(request.user, created_invitations, workspace)
         
         return JsonResponse({
             'success': True,
@@ -402,33 +426,55 @@ class CreateIndividualInvitationsView(LoginRequiredMixin, View):
         })
     
     def send_invitation_notification(self, invitation, request):
-        """Отправляет уведомление о приглашении"""
+        """Отправляет email уведомление о приглашении"""
         invitation_url = request.build_absolute_uri(
             reverse('workspace:accept_invitation', kwargs={'token': invitation.invitation_token})
         )
         
-        if invitation.email:
-            # Отправка на email
-            subject = f'Приглашение в рабочую область {invitation.workspace.name}'
-            message = f'''
-            Вас пригласили присоединиться к рабочей области "{invitation.workspace.name}".
-            
-            Для принятия приглашения перейдите по ссылке:
-            {invitation_url}
-            
-            Если у вас нет аккаунта, зарегистрируйтесь и используйте эту же ссылку.
-            '''
-            
-            send_mail(
-                subject,
-                message,
-                settings.DEFAULT_FROM_EMAIL,
-                [invitation.email],
-                fail_silently=True,
-            )
+        subject = f'Приглашение в рабочую область {invitation.workspace.name}'
+        message = f'''
+        Вас пригласили присоединиться к рабочей области "{invitation.workspace.name}".
         
-        # TODO: Добавить отправку уведомления в системе
-        # (зависит от вашей системы уведомлений)
+        Для принятия приглашения перейдите по ссылке:
+        {invitation_url}
+        '''
+        
+        send_mail(
+            subject,
+            message,
+            settings.DEFAULT_FROM_EMAIL,
+            [invitation.invited_user.email],
+            fail_silently=True,
+        )
+    
+    def create_system_notification(self, invitation, request):
+        """Создает системное уведомление для приглашенного пользователя"""
+        invitation_url = request.build_absolute_uri(
+            reverse('workspace:accept_invitation', kwargs={'token': invitation.invitation_token})
+        )
+        
+        message = f'Вас пригласили присоединиться к рабочей области "{invitation.workspace.name}"'
+        
+        Notification.objects.create(
+            user=invitation.invited_user,
+            message=message,
+            level='info',
+            related_url=invitation_url
+        )
+    
+    def create_creator_notification(self, creator, created_invitations, workspace):
+        """Создает уведомление для пользователя, который отправил приглашения"""
+        if len(created_invitations) == 1:
+            invited_user = created_invitations[0].invited_user
+            message = f'Вы отправили приглашение пользователю {invited_user.username} в рабочую область "{workspace.name}"'
+        else:
+            message = f'Вы отправили {len(created_invitations)} приглашений в рабочую область "{workspace.name}"'
+        
+        Notification.objects.create(
+            user=creator,
+            message=message,
+            level='info'
+        )
 
 
 class ToggleAllInvitationsView(LoginRequiredMixin, View):
@@ -499,7 +545,7 @@ class AcceptInvitationView(LoginRequiredMixin, View):
     
     def handle_individual_invitation(self, request, invitation):
         """Обрабатывает индивидуальное приглашение"""
-        print(f"DEBUG: Handling individual invitation for {invitation.email or invitation.unique_code}")  # Для отладки
+        print(f"DEBUG: Handling individual invitation for {invitation.invited_user.email}")  # Для отладки
         
         # Проверяем, соответствует ли пользователь приглашению
         if not self.user_matches_invitation(request.user, invitation):
@@ -511,6 +557,9 @@ class AcceptInvitationView(LoginRequiredMixin, View):
         invitation.status = 'accepted'
         invitation.accepted_at = timezone.now()
         invitation.save()
+        
+        # Создаем уведомление о принятии приглашения
+        self.create_acceptance_notifications(invitation, request)
         
         messages.success(request, f'Вы успешно присоединились к рабочей области {invitation.workspace.name}')
         return redirect('workspace:workspace_detail', workspace_url_hash=invitation.workspace.url_hash)
@@ -524,22 +573,43 @@ class AcceptInvitationView(LoginRequiredMixin, View):
         workspace.mass_invitation_current_uses += 1
         workspace.save()
         
+        # Создаем уведомление о присоединении через массовое приглашение
+        self.create_mass_invitation_notification(request.user, workspace)
+        
         messages.success(request, f'Вы успешно присоединились к рабочей области {workspace.name}')
         return redirect('workspace:workspace_detail', workspace_url_hash=workspace.url_hash)
     
     def user_matches_invitation(self, user, invitation):
         """Проверяет, соответствует ли пользователь приглашению"""
-        # Если приглашение по email - проверяем email
-        if invitation.email and invitation.email == user.email:
-            return True
+        # Простая проверка - пользователь должен совпадать с приглашенным
+        return user == invitation.invited_user
+    
+    def create_acceptance_notifications(self, invitation, request):
+        """Создает уведомления о принятии приглашения"""
+        workspace_url = request.build_absolute_uri(
+            reverse('workspace:workspace_detail', kwargs={'workspace_url_hash': invitation.workspace.url_hash})
+        )
         
-        # Если приглашение по коду - проверяем код
-        if invitation.unique_code:
-            try:
-                user_profile = UserProfile.objects.get(user=user)
-                if user_profile.unique_code == invitation.unique_code:
-                    return True
-            except UserProfile.DoesNotExist:
-                pass
+        # Уведомление для принявшего приглашение пользователя
+        Notification.objects.create(
+            user=invitation.invited_user,
+            message=f'Вы приняли приглашение в рабочую область "{invitation.workspace.name}"',
+            level='info',
+            related_url=workspace_url
+        )
         
-        return False
+        # Уведомление для создателя приглашения
+        Notification.objects.create(
+            user=invitation.created_by,
+            message=f'Пользователь {invitation.invited_user.email} принял ваше приглашение в рабочую область "{invitation.workspace.name}"',
+            level='info',
+            related_url=workspace_url
+        )
+    
+    def create_mass_invitation_notification(self, user, workspace):
+        """Создает уведомление о присоединении через массовое приглашение"""
+        Notification.objects.create(
+            user=user,
+            message=f'Вы присоединились к рабочей области "{workspace.name}" через массовое приглашение',
+            level='info'
+        )

@@ -4,41 +4,270 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>{% block title %}{% endblock %}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
-    <link rel="shortcut icon" href="{%  static 'favicon.ico' %}">
+    <link rel="shortcut icon" href="{% static 'favicon.ico' %}">
     <link rel="stylesheet" href="{% static 'css/layout.css' %}">
     {% block head %}{% endblock %}
+    <style>
+        .notification-unread {
+            background-color: #fff5f5 !important;
+            border-left: 3px solid #ff4444;
+        }
+        
+        .notification-read {
+            background-color: white !important;
+            opacity: 0.7;
+        }
+        
+        .notification-item {
+            padding: 8px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .notification-item:hover {
+            background-color: #f8f9fa !important;
+        }
+    </style>
 </head>
-<body style="font-family: Geologica;">
-    <div class="no_select">
-        <div class="layout_header" style="display: flex; justify-content: space-between; background-color: rgb(230, 230, 230);">
-            
-            <div style="display: flex; gap: 10px;">
-                <div class="logotype"><a href="/">main</a></div>
+<body style="font-family: Geologica; margin: 0;">
+    {% csrf_token %}
+    
+    <div style="background: #e6e6e6; padding: 10px; display: flex; justify-content: space-between;">
+        <div>
+            <a href="/">main</a>
+        </div>
+        
+        <div style="display: flex; gap: 15px;">
+            {% if user.is_authenticated %}
+                <!-- Уведомления -->
+                <div style="position: relative;">
+                    <button onclick="toggleNotifications()" style="background: none; border: none; cursor: pointer;">
+                        🔔{% if unread_notifications_count %}({{ unread_notifications_count }}){% endif %}
+                    </button>
+                    
+                    <div id="notificationsPreview" style="display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; width: 250px; max-height: 300px; overflow-y: auto; z-index: 1000;">
+                        <div style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">
+                            Уведомления
+                            {% if notifications.count > 5 %}
+                            <button onclick="showAllNotifications()" style="float: right; background: none; border: none; cursor: pointer;">Все</button>
+                            {% endif %}
+                        </div>
+                        
+                        {% for notification in recent_notifications %}
+                            <div onclick="openNotification({{ notification.id }})" 
+                                 class="notification-item {% if not notification.is_read %}notification-unread{% else %}notification-read{% endif %}">
+                                <div>{{ notification.message }}</div>
+                                <small style="color: #666;">{{ notification.created_at|date:"d.m.Y H:i" }}</small>
+                            </div>
+                        {% empty %}
+                            <div style="padding: 20px; text-align: center; color: #666;">Нет уведомлений</div>
+                        {% endfor %}
+                    </div>
+                </div>
                 
-            </div>
-            
-            <div style="display: flex; gap: 10px;">
-                {% if user.is_authenticated %}
-                    <div><a href='/profile/'>{{ user.username }}</a></div>    
-                    <div><a href='/workspace/'>workspace</a></div>
-                {% endif %}
-                <div><a href='/account/login/'>login</a></div>
-                <div><a href='/account/logout/'>logout</a></div>   
-            </div>
+                <a href="/workspace/">workspace</a>
+                <a href="/profile/">{{ user.username }}</a>
+                <a href="/account/logout/">logout</a>
+            {% else %}
+                <a href="/account/login/">login</a>
+            {% endif %}
+        </div>
+    </div>
 
+    <!-- Модальные окна -->
+    <div id="allNotificationsModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="background: white; width: 90%; max-width: 500px; margin: 50px auto; padding: 0; border-radius: 5px;">
+            <div style="padding: 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+                <div style="font-weight: bold;">Все уведомления</div>
+                <button onclick="closeAllNotifications()" style="background: none; border: none; cursor: pointer; font-size: 18px;">×</button>
+            </div>
+            <div id="allNotificationsList" style="max-height: 400px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <div id="notificationModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="background: white; width: 90%; max-width: 400px; margin: 50px auto; padding: 0; border-radius: 5px;">
+            <div style="padding: 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+                <div style="font-weight: bold;">Уведомление</div>
+                <button onclick="closeNotification()" style="background: none; border: none; cursor: pointer; font-size: 18px;">×</button>
+            </div>
+            <div style="padding: 20px;">
+                <div id="notificationModalContent" style="line-height: 1.5;"></div>
+                <div id="notificationModalTime" style="margin-top: 15px; font-size: 12px; color: #666; text-align: right;"></div>
+                <div id="notificationModalUrl" style="margin-top: 15px; text-align: center;"></div>
+            </div>
         </div>
     </div>
 
     <div class="scrollable-container">
-        <div class="layout_central_block" id="page-content">
+        <div class="layout_central_block">
             {% block content %}
             {% endblock %}
         </div>
     </div>
+
+    <script>
+        function toggleNotifications() {
+            const preview = document.getElementById('notificationsPreview');
+            preview.style.display = preview.style.display === 'block' ? 'none' : 'block';
+        }
+        
+        function showAllNotifications() {
+            document.getElementById('notificationsPreview').style.display = 'none';
+            document.getElementById('allNotificationsModal').style.display = 'block';
+            loadAllNotifications();
+        }
+        
+        function closeAllNotifications() {
+            document.getElementById('allNotificationsModal').style.display = 'none';
+        }
+        
+        function openNotification(notificationId) {
+            // Сразу обновляем внешний вид для мгновенной обратной связи
+            updateNotificationAppearance(notificationId);
+            
+            // Отмечаем как прочитанное на сервере
+            markNotificationAsRead(notificationId);
+            
+            // Загружаем и показываем содержимое уведомления
+            fetch(`/notifications/${notificationId}/`, {
+                headers: {'X-Requested-With': 'XMLHttpRequest'}
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('notificationModalContent').textContent = data.notification.message;
+                    document.getElementById('notificationModalTime').textContent = data.notification.created_at;
+                    
+                    const urlContainer = document.getElementById('notificationModalUrl');
+                    if (data.notification.related_url) {
+                        urlContainer.innerHTML = `<a href="${data.notification.related_url}" style="color: #007bff; text-decoration: none; font-weight: 500;">Перейти →</a>`;
+                    } else {
+                        urlContainer.innerHTML = '';
+                    }
+                    
+                    document.getElementById('notificationModal').style.display = 'block';
+                }
+            })
+            .catch(error => {
+                console.error('Error loading notification:', error);
+            });
+        }
+        
+        function closeNotification() {
+            document.getElementById('notificationModal').style.display = 'none';
+        }
+        
+        function loadAllNotifications() {
+            fetch('/notifications/all/', {
+                headers: {'X-Requested-With': 'XMLHttpRequest'}
+            })
+            .then(r => r.json())
+            .then(data => {
+                const container = document.getElementById('allNotificationsList');
+                container.innerHTML = '';
+                
+                if (data.notifications.length === 0) {
+                    container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Нет уведомлений</div>';
+                    return;
+                }
+                
+                data.notifications.forEach(notification => {
+                    const div = document.createElement('div');
+                    div.className = `notification-item ${notification.is_read ? 'notification-read' : 'notification-unread'}`;
+                    div.setAttribute('onclick', `openNotification(${notification.id})`);
+                    div.innerHTML = `
+                        <div>${notification.message}</div>
+                        <small style="color: #666;">${notification.created_at}</small>
+                    `;
+                    container.appendChild(div);
+                });
+            })
+            .catch(error => {
+                console.error('Error loading all notifications:', error);
+                const container = document.getElementById('allNotificationsList');
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Ошибка загрузки уведомлений</div>';
+            });
+        }
+        
+        function markNotificationAsRead(notificationId) {
+            const formData = new FormData();
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+            formData.append('csrfmiddlewaretoken', csrfToken);
+            
+            fetch(`/notifications/${notificationId}/mark-read/`, {
+                method: 'POST',
+                body: formData,
+                headers: {'X-Requested-With': 'XMLHttpRequest'}
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    // Обновляем счетчик непрочитанных
+                    updateUnreadCount();
+                }
+            })
+            .catch(error => {
+                console.error('Error marking notification as read:', error);
+            });
+        }
+        
+        function updateNotificationAppearance(notificationId) {
+            // Обновляем в превью
+            const previewNotifications = document.querySelectorAll(`#notificationsPreview [onclick="openNotification(${notificationId})"]`);
+            previewNotifications.forEach(element => {
+                element.classList.remove('notification-unread');
+                element.classList.add('notification-read');
+            });
+            
+            // Обновляем в полном списке
+            const allNotifications = document.querySelectorAll(`#allNotificationsList [onclick="openNotification(${notificationId})"]`);
+            allNotifications.forEach(element => {
+                element.classList.remove('notification-unread');
+                element.classList.add('notification-read');
+            });
+        }
+        
+        function updateUnreadCount() {
+            const button = document.querySelector('button[onclick="toggleNotifications()"]');
+            if (button) {
+                const currentText = button.textContent;
+                const match = currentText.match(/🔔\((\d+)\)/);
+                if (match) {
+                    const currentCount = parseInt(match[1]) - 1;
+                    if (currentCount > 0) {
+                        button.textContent = `🔔(${currentCount})`;
+                    } else {
+                        button.textContent = '🔔';
+                    }
+                }
+            }
+        }
+        
+        // Закрытие при клике вне области
+        document.addEventListener('click', function(e) {
+            const preview = document.getElementById('notificationsPreview');
+            const button = document.querySelector('button[onclick="toggleNotifications()"]');
+            
+            if (preview && button && !button.contains(e.target) && !preview.contains(e.target)) {
+                preview.style.display = 'none';
+            }
+            
+            // Закрытие модальных окон при клике на фон
+            if (e.target.id === 'allNotificationsModal') {
+                closeAllNotifications();
+            }
+            if (e.target.id === 'notificationModal') {
+                closeNotification();
+            }
+        });
+    </script>
 </body>
 </html>

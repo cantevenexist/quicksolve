@@ -128,7 +128,6 @@ class TeamMembership(models.Model):
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     role = models.CharField(max_length=20, default='member')
-    joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = ['team', 'user']
@@ -272,9 +271,16 @@ class IndividualInvitation(models.Model):
     """Модель для точечных приглашений"""
     
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE)
-    email = models.EmailField(null=True, blank=True)
-    unique_code = models.CharField(max_length=12, null=True, blank=True)
+    created_by = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE,
+        related_name='created_invitations'
+    )
+    invited_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='received_invitations'
+    )
     invitation_token = models.CharField(max_length=64, unique=True, blank=True)
     status = models.CharField(
         max_length=20,
@@ -288,6 +294,16 @@ class IndividualInvitation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     accepted_at = models.DateTimeField(null=True, blank=True)
     
+    class Meta:
+        # Уникальное ограничение, чтобы нельзя было пригласить одного пользователя дважды
+        constraints = [
+            models.UniqueConstraint(
+                fields=['workspace', 'invited_user'],
+                condition=models.Q(status='pending'),
+                name='unique_pending_invitation_per_user'
+            )
+        ]
+    
     def save(self, *args, **kwargs):
         if not self.invitation_token:
             self.invitation_token = hashlib.sha256(
@@ -296,5 +312,4 @@ class IndividualInvitation(models.Model):
         super().save(*args, **kwargs)
     
     def __str__(self):
-        identifier = self.email or self.unique_code
-        return f"Приглашение для {identifier} в {self.workspace.name}"
+        return f"Приглашение для {self.invited_user.email} в {self.workspace.name}"

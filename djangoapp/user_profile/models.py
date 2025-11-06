@@ -31,3 +31,24 @@ class UserProfile(models.Model):
                 code = str(uuid.uuid4())[:12].upper().replace('-', '')
             self.unique_code = code
         super().save(*args, **kwargs)
+
+
+class Notification(models.Model):
+    LEVELS = (
+        ('info', 'Информация'),
+        ('warning', 'Предупреждение'),
+        ('error', 'Ошибка'),
+    )
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    message = models.TextField()
+    level = models.CharField(max_length=10, choices=LEVELS, default='info')
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    related_url = models.URLField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"[{self.level.upper()}] {self.message[:50]}"

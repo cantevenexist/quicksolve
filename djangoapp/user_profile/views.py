@@ -2,9 +2,10 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.views import View
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib import messages
-from .models import User, UserProfile
+from .models import User, UserProfile, Notification
 from .forms import UserProfileForm
-
+from django.http import JsonResponse
+import uuid
 
 class MyProfileView(LoginRequiredMixin, View):
     def get(self, request):
@@ -59,10 +60,6 @@ class ProfileEditView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
-from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
-import uuid
-
 class RegenerateUniqueCodeView(LoginRequiredMixin, View):
     """Представление для генерации нового уникального кода"""
     
@@ -100,3 +97,58 @@ class RegenerateUniqueCodeView(LoginRequiredMixin, View):
             'success': True,
             'new_code': profile.unique_code,
         })
+
+
+class NotificationDetailView(LoginRequiredMixin, View):
+    """Получить детали уведомления"""
+    
+    def get(self, request, notification_id):
+        notification = get_object_or_404(Notification, id=notification_id, user=request.user)
+        
+        return JsonResponse({
+            'success': True,
+            'notification': {
+                'id': notification.id,
+                'message': notification.message,
+                'level': notification.level,
+                'is_read': notification.is_read,
+                'created_at': notification.created_at,
+                'related_url': notification.related_url or ''
+            }
+        })
+
+class AllNotificationsView(LoginRequiredMixin, View):
+    """Получить все уведомления пользователя"""
+    
+    def get(self, request):
+        notifications = Notification.objects.filter(user=request.user)
+        
+        notifications_data = []
+        for notification in notifications:
+            notifications_data.append({
+                'id': notification.id,
+                'message': notification.message,
+                'level': notification.level,
+                'is_read': notification.is_read,
+                'created_at': notification.created_at.strftime("%d.%m.%Y %H:%M"),
+                'related_url': notification.related_url or ''
+            })
+        
+        return JsonResponse({
+            'success': True,
+            'notifications': notifications_data
+        })
+
+class MarkNotificationReadView(LoginRequiredMixin, View):
+    """Пометить уведомление как прочитанное"""
+    
+    def post(self, request, notification_id):
+        # Проверяем, что запрос пришел через AJAX
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        notification = get_object_or_404(Notification, id=notification_id, user=request.user)
+        notification.is_read = True
+        notification.save()
+        
+        return JsonResponse({'success': True})
