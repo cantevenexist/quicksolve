@@ -152,9 +152,37 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         team = self.get_object()
+        
+        # Получаем текущих участников команды
+        team_members = TeamMembership.objects.filter(team=team).select_related('user')
+        
+        # Получаем всех пользователей рабочей области
+        workspace_members = WorkspaceMembership.objects.filter(
+            workspace=team.workspace
+        ).select_related('user')
+        
+        # Создаем список ID пользователей, которые уже в команде
+        team_member_ids = set(team_members.values_list('user_id', flat=True))
+        
+        # Фильтруем пользователей рабочей области, исключая тех, кто уже в команде
+        available_users = [
+            member for member in workspace_members 
+            if member.user_id not in team_member_ids
+        ]
+        
+        # Получаем membership текущего пользователя
+        user_membership = TeamMembership.objects.filter(
+            team=team, 
+            user=self.request.user
+        ).first()
+        
         context['tasks'] = Task.objects.filter(team=team)
         context['is_team_member'] = team.members.filter(id=self.request.user.id).exists()
-        context['team_members'] = TeamMembership.objects.filter(team=team).select_related('user')
+        context['team_members'] = team_members
+        context['workspace_members'] = available_users
+        context['team_members_users'] = [member.user for member in team_members]
+        context['user_membership'] = user_membership  # Добавляем информацию о текущем пользователе
+        
         return context
 
 
@@ -668,6 +696,376 @@ class AcceptInvitationView(LoginRequiredMixin, View):
             level='info'
         )
 
+class TeamInviteMemberView(LoginRequiredMixin, View):
+    """Приглашение пользователей в команду"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        team = get_object_or_404(
+            Team, 
+            url_hash=kwargs['team_url_hash'],
+            workspace__url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, что пользователь - лидер или администратор команды
+        user_membership = TeamMembership.objects.filter(
+            team=team,
+            user=request.user
+        ).first()
+        
+        if not user_membership or user_membership.role not in ['leader', 'admin']:
+            return JsonResponse({'success': False, 'error': 'No permission'})
+        
+        user_ids = request.POST.getlist('user_ids[]')
+        if not user_ids:
+            return JsonResponse({'success': False, 'error': 'No users selected'})
+        
+        added_users = []
+        errors = []
+        
+        for user_id in user_ids:
+            try:
+                user_to_add = User.objects.get(id=user_id)
+                
+                # Проверяем, что пользователь является участником workspace
+                if not WorkspaceMembership.objects.filter(
+                    workspace=team.workspace, 
+                    user=user_to_add
+                ).exists():
+                    errors.append(f"Пользователь {user_to_add.username} не является участником рабочей области")
+                    continue
+                
+                # Проверяем, не является ли пользователь уже участником команды
+                if TeamMembership.objects.filter(team=team, user=user_to_add).exists():
+                    errors.append(f"Пользователь {user_to_add.username} уже в команде")
+                    continue
+                
+                # Добавляем пользователя в команду с ролью участника
+                TeamMembership.objects.create(
+                    team=team,
+                    user=user_to_add,
+                    role='member'
+                )
+                
+                added_users.append({
+                    'id': user_to_add.id,
+                    'username': user_to_add.username,
+                    'email': user_to_add.email
+                })
+                
+                # Создаем уведомление для добавленного пользователя
+                self.create_team_join_notification(user_to_add, team, request)
+                
+            except User.DoesNotExist:
+                errors.append(f"Пользователь с ID {user_id} не найден")
+                continue
+        
+        # Создаем уведомление для приглашающего
+        if added_users:
+            self.create_inviter_notification(request.user, added_users, team)
+        
+        return JsonResponse({
+            'success': True,
+            'added_count': len(added_users),
+            'added_users': added_users,
+            'errors': errors
+        })
+    
+    def create_team_join_notification(self, user, team, request):
+        """Создает уведомление о добавлении в команду"""
+        team_url = request.build_absolute_uri(
+            reverse('workspace:team_detail', kwargs={
+                'workspace_url_hash': team.workspace.url_hash,
+                'team_url_hash': team.url_hash
+            })
+        )
+        
+        message = f'Вас добавили в команду "{team.name}" рабочей области "{team.workspace.name}"'
+        
+        Notification.objects.create(
+            user=user,
+            message=message,
+            level='info',
+            related_url=team_url
+        )
+    
+    def create_inviter_notification(self, inviter, added_users, team):
+        """Создает уведомление для пользователя, который добавил участников"""
+        if len(added_users) == 1:
+            added_user = added_users[0]
+            message = f'Вы добавили пользователя {added_user["username"]} в команду "{team.name}"'
+        else:
+            message = f'Вы добавили {len(added_users)} пользователей в команду "{team.name}"'
+        
+        Notification.objects.create(
+            user=inviter,
+            message=message,
+            level='info'
+        )
+
+class WorkspaceKickMemberView(LoginRequiredMixin, View):
+    """Удаление пользователей из рабочей области"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        workspace = get_object_or_404(
+            Workspace, 
+            url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, что пользователь - владелец или администратор рабочей области
+        user_membership = WorkspaceMembership.objects.filter(
+            workspace=workspace,
+            user=request.user
+        ).first()
+        
+        if not user_membership or user_membership.role not in ['owner', 'admin']:
+            return JsonResponse({'success': False, 'error': 'No permission'})
+        
+        user_ids = request.POST.getlist('user_ids[]')
+        if not user_ids:
+            return JsonResponse({'success': False, 'error': 'No users selected'})
+        
+        # Не позволяем удалить самого себя
+        if str(request.user.id) in user_ids:
+            return JsonResponse({'success': False, 'error': 'Cannot remove yourself'})
+        
+        removed_users = []
+        errors = []
+        
+        for user_id in user_ids:
+            try:
+                user_to_remove = User.objects.get(id=user_id)
+                
+                # Проверяем, что пользователь действительно в рабочей области
+                membership = WorkspaceMembership.objects.filter(
+                    workspace=workspace, 
+                    user=user_to_remove
+                ).first()
+                
+                if not membership:
+                    errors.append(f"Пользователь {user_to_remove.username} не состоит в рабочей области")
+                    continue
+                
+                # Проверяем права доступа для удаления
+                removal_error = self.check_removal_permission(user_membership, membership, user_to_remove)
+                if removal_error:
+                    errors.append(removal_error)
+                    continue
+                
+                # Удаляем пользователя из рабочей области и всех его команд
+                self.remove_user_from_workspace(user_to_remove, workspace)
+                
+                removed_users.append({
+                    'id': user_to_remove.id,
+                    'username': user_to_remove.username,
+                    'email': user_to_remove.email
+                })
+                
+                # Создаем уведомление для удаленного пользователя
+                self.create_workspace_leave_notification(user_to_remove, workspace, request)
+                
+            except User.DoesNotExist:
+                errors.append(f"Пользователь с ID {user_id} не найден")
+                continue
+        
+        # Создаем уведомление для удаляющего
+        if removed_users:
+            self.create_kicker_notification(request.user, removed_users, workspace)
+        
+        return JsonResponse({
+            'success': True,
+            'removed_count': len(removed_users),
+            'removed_users': removed_users,
+            'errors': errors
+        })
+    
+    def check_removal_permission(self, user_membership, target_membership, target_user):
+        """Проверяет права доступа для удаления пользователя"""
+        # Владелец может удалить кого угодно (кроме себя)
+        if user_membership.role == 'owner':
+            return None
+        
+        # Администратор может удалять только обычных участников
+        if user_membership.role == 'admin':
+            if target_membership.role == 'owner':
+                return f"Нельзя удалить владельца рабочей области {target_user.username}"
+            elif target_membership.role == 'admin':
+                return f"Нельзя удалить другого администратора {target_user.username}"
+            else:
+                return None
+        
+        return "Недостаточно прав для удаления"
+    
+    def remove_user_from_workspace(self, user, workspace):
+        """Удаляет пользователя из рабочей области и всех команд"""
+        # Удаляем из рабочей области
+        WorkspaceMembership.objects.filter(
+            workspace=workspace, 
+            user=user
+        ).delete()
+        
+        # Удаляем из всех команд в этой рабочей области
+        TeamMembership.objects.filter(
+            team__workspace=workspace,
+            user=user
+        ).delete()
+    
+    def create_workspace_leave_notification(self, user, workspace, request):
+        """Создает уведомление об удалении из рабочей области"""
+        message = f'Вас удалили из рабочей области "{workspace.name}"'
+        
+        Notification.objects.create(
+            user=user,
+            message=message,
+            level='warning'
+        )
+    
+    def create_kicker_notification(self, kicker, removed_users, workspace):
+        """Создает уведомление для пользователя, который удалил участников"""
+        if len(removed_users) == 1:
+            removed_user = removed_users[0]
+            message = f'Вы удалили пользователя {removed_user["username"]} из рабочей области "{workspace.name}"'
+        else:
+            message = f'Вы удалили {len(removed_users)} пользователей из рабочей области "{workspace.name}"'
+        
+        Notification.objects.create(
+            user=kicker,
+            message=message,
+            level='info'
+        )
+        
+class TeamKickMemberView(LoginRequiredMixin, View):
+    """Удаление пользователей из команды"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        team = get_object_or_404(
+            Team, 
+            url_hash=kwargs['team_url_hash'],
+            workspace__url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, что пользователь - лидер или администратор команды
+        user_membership = TeamMembership.objects.filter(
+            team=team,
+            user=request.user
+        ).first()
+        
+        if not user_membership or user_membership.role not in ['leader', 'admin']:
+            return JsonResponse({'success': False, 'error': 'No permission'})
+        
+        user_ids = request.POST.getlist('user_ids[]')
+        if not user_ids:
+            return JsonResponse({'success': False, 'error': 'No users selected'})
+        
+        # Не позволяем удалить самого себя
+        if str(request.user.id) in user_ids:
+            return JsonResponse({'success': False, 'error': 'Cannot remove yourself'})
+        
+        removed_users = []
+        errors = []
+        
+        for user_id in user_ids:
+            try:
+                user_to_remove = User.objects.get(id=user_id)
+                
+                # Проверяем, что пользователь действительно в команде
+                membership = TeamMembership.objects.filter(
+                    team=team, 
+                    user=user_to_remove
+                ).first()
+                
+                if not membership:
+                    errors.append(f"Пользователь {user_to_remove.username} не состоит в команде")
+                    continue
+                
+                # Проверяем права доступа для удаления
+                removal_error = self.check_removal_permission(user_membership, membership, user_to_remove)
+                if removal_error:
+                    errors.append(removal_error)
+                    continue
+                
+                # Удаляем пользователя из команды
+                membership.delete()
+                
+                removed_users.append({
+                    'id': user_to_remove.id,
+                    'username': user_to_remove.username,
+                    'email': user_to_remove.email
+                })
+                
+                # Создаем уведомление для удаленного пользователя
+                self.create_team_leave_notification(user_to_remove, team, request)
+                
+            except User.DoesNotExist:
+                errors.append(f"Пользователь с ID {user_id} не найден")
+                continue
+        
+        # Создаем уведомление для удаляющего
+        if removed_users:
+            self.create_kicker_notification(request.user, removed_users, team)
+        
+        return JsonResponse({
+            'success': True,
+            'removed_count': len(removed_users),
+            'removed_users': removed_users,
+            'errors': errors
+        })
+    
+    def check_removal_permission(self, user_membership, target_membership, target_user):
+        """Проверяет права доступа для удаления пользователя"""
+        # Лидер может удалить кого угодно (кроме себя)
+        if user_membership.role == 'leader':
+            return None
+        
+        # Администратор может удалять только обычных участников
+        if user_membership.role == 'admin':
+            if target_membership.role == 'leader':
+                return f"Нельзя удалить лидера команды {target_user.username}"
+            elif target_membership.role == 'admin':
+                return f"Нельзя удалить другого администратора {target_user.username}"
+            else:
+                return None
+        
+        return "Недостаточно прав для удаления"
+    
+    def create_team_leave_notification(self, user, team, request):
+        """Создает уведомление об удалении из команды"""
+        workspace_url = request.build_absolute_uri(
+            reverse('workspace:workspace_detail', kwargs={
+                'workspace_url_hash': team.workspace.url_hash
+            })
+        )
+        
+        message = f'Вас удалили из команды "{team.name}" рабочей области "{team.workspace.name}"'
+        
+        Notification.objects.create(
+            user=user,
+            message=message,
+            level='warning',
+            related_url=workspace_url
+        )
+    
+    def create_kicker_notification(self, kicker, removed_users, team):
+        """Создает уведомление для пользователя, который удалил участников"""
+        if len(removed_users) == 1:
+            removed_user = removed_users[0]
+            message = f'Вы удалили пользователя {removed_user["username"]} из команды "{team.name}"'
+        else:
+            message = f'Вы удалили {len(removed_users)} пользователей из команды "{team.name}"'
+        
+        Notification.objects.create(
+            user=kicker,
+            message=message,
+            level='info'
+        )
 '''
 todo:
     WorkspaceChangeMemberRoleView

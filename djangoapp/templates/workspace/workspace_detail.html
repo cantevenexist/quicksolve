@@ -69,112 +69,161 @@
             </div>
             
             <!-- Участники -->
-            <div id="contentMembers" style="display: none;">
-                <h3>Участники рабочей области</h3>
-                
-                <!-- Текущие участники -->
-                <div style="margin-bottom: 30px;">
-                    <h4>Текущие участники</h4>
-                    <ul>
-                        {% for member in members %}
-                            <li>{{ member.user }} ({{ member.get_role_display }})</li>
-                        {% empty %}
-                            <li>Нет других участников</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-
-                <!-- Массовое приглашение -->
-                <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
-                    <h4>Массовое приглашение</h4>
-                    
-                    {% if mass_invitation_url %}
-                    <div id="existingMassInvitation" style="margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #e9ecef;">
-                        <p style="margin: 0 0 10px 0; font-weight: bold;">
-                            {% if mass_invitation_data.can_be_used %}Текущая активная ссылка:{% else %}Текущая ссылка (неактивна):{% endif %}
-                        </p>
-                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                            <input type="text" id="existingInvitationLink" value="{{ mass_invitation_url }}" readonly 
-                                   style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #fff;">
-                            <button type="button" onclick="copyExistingInvitationLink()" 
-                                    style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
-                                Копировать
-                            </button>
-                        </div>
-                        <div style="font-size: 12px; color: #666;">
-                            <div>Срок действия: {{ mass_invitation_data.expiration_time }}</div>
-                            <div>Использований: {{ mass_invitation_data.max_uses }} (текущее: {{ mass_invitation_data.current_uses }})</div>
-                            <div>Статус: <span style="color: {% if mass_invitation_data.can_be_used %}#28a745{% else %}#dc3545{% endif %};">{% if mass_invitation_data.can_be_used %}Активно{% else %}Неактивно{% endif %}</span></div>
-                        </div>
+<div id="contentMembers" style="display: none;">
+    <h3>Участники рабочей области</h3>
+    
+    <!-- Текущие участники -->
+    <div style="margin-bottom: 30px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0;">Текущие участники</h4>
+            <div>
+                <button id="kickMembersBtn" type="button" onclick="toggleKickMode()" style="padding: 6px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
+                    Удалить
+                </button>
+                <button id="cancelKickBtn" type="button" onclick="cancelKickMode()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;">
+                    Отменить
+                </button>
+            </div>
+        </div>
+        
+        <div id="membersList">
+            {% for member in members %}
+                <div class="member-item" style="padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
+                    <input type="checkbox" name="kick_user_ids" value="{{ member.user.id }}" 
+                           style="margin-right: 10px; display: none;" 
+                           class="kick-checkbox"
+                           {% if member.user == request.user or member.role == 'owner' %}disabled{% endif %}>
+                    <div style="flex: 1;">
+                        {{ member.user }} ({{ member.get_role_display }})
+                        {% if member.user == request.user %}<span style="color: #666;">(Вы)</span>{% endif %}
                     </div>
-                    {% endif %}
-                    
-                    <form id="massInvitationForm">
-                        {% csrf_token %}
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Срок действия:</label>
-                            <select name="expiration_time" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-                                <option value="">Бессрочно</option>
-                                <option value="3600">1 час</option>
-                                <option value="14400">4 часа</option>
-                                <option value="86400">24 часа</option>
-                                <option value="172800">48 часов</option>
-                                <option value="259200">72 часа</option>
-                            </select>
-                        </div>
-                        
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Количество использований:</label>
-                            <input type="number" name="max_uses" min="1" placeholder="Оставьте пустым для безграничного использования"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-                        </div>
-                        
-                        <button type="button" onclick="createMassInvitation()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
-                            {% if mass_invitation_url %}Обновить ссылку{% else %}Создать ссылку{% endif %}
-                        </button>
-                    </form>
-                    
-                    <div id="massInvitationResult" style="margin-top: 15px; display: none;"></div>
                 </div>
+            {% empty %}
+                <li>Нет других участников</li>
+            {% endfor %}
+        </div>
+        
+        <div id="kickActions" style="margin-top: 15px; display: none;">
+            <button type="button" onclick="confirmKickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Удалить выбранных
+            </button>
+            <span id="selectedCount" style="margin-left: 10px; color: #666;"></span>
+        </div>
+    </div>
 
-                <!-- Точечное приглашение -->
-                <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
-                    <h4>Точечное приглашение</h4>
-                    <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
-                        Введите почты или уникальные коды через пробел или Enter
-                    </p>
-                    
-                    <form id="individualInvitationForm">
-                        {% csrf_token %}
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Почты или коды:</label>
-                            <input type="text" id="identifiersInput" 
-                                   placeholder="user1@example.com ABC123 user2@example.com"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-                            
-                            <div id="identifiersList" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px;"></div>
-                        </div>
-                        
-                        <button type="button" onclick="createIndividualInvitations()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
-                            Отправить приглашения
-                        </button>
-                    </form>
-                    
-                    <div id="individualInvitationResult" style="margin-top: 15px; display: none;"></div>
-                </div>
-
-                <!-- Управление приглашениями -->
-                <div style="padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;">
-                    <h4>Управление приглашениями</h4>
-                    <div style="display: flex; align-items: center; gap: 15px;">
-                        <span>Статус массового приглашения:</span>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" id="toggleAllInvitations" {% if mass_invitation_data.is_active %}checked{% endif %} onchange="toggleAllInvitations()" style="margin-right: 8px;">
-                            <span>{% if mass_invitation_data.is_active %}Активно{% else %}Неактивно{% endif %}</span>
-                        </label>
-                    </div>
+    <!-- Массовое приглашение -->
+    <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+        <h4>Массовое приглашение</h4>
+        
+        {% if mass_invitation_url %}
+        <div id="existingMassInvitation" style="margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #e9ecef;">
+            <p style="margin: 0 0 10px 0; font-weight: bold;">
+                {% if mass_invitation_data.can_be_used %}Текущая активная ссылка:{% else %}Текущая ссылка (неактивна):{% endif %}
+            </p>
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <input type="text" id="existingInvitationLink" value="{{ mass_invitation_url }}" readonly 
+                       style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #fff;">
+                <button type="button" onclick="copyExistingInvitationLink()" 
+                        style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+                    Копировать
+                </button>
+            </div>
+            <div style="font-size: 12px; color: #666;">
+                <div>Срок действия: {{ mass_invitation_data.expiration_time }}</div>
+                <div>Использований: {{ mass_invitation_data.max_uses }} (текущее: {{ mass_invitation_data.current_uses }})</div>
+                <div>Статус: 
+                    <span class="status-indicator" data-status="{% if mass_invitation_data.can_be_used %}active{% else %}inactive{% endif %}">
+                        {% if mass_invitation_data.can_be_used %}Активно{% else %}Неактивно{% endif %}
+                    </span>
+                    <style>
+                    .status-indicator[data-status="active"] { color: #28a745; }
+                    .status-indicator[data-status="inactive"] { color: #dc3545; }
+                    </style>
                 </div>
             </div>
+        </div>
+        {% endif %}
+        
+        <form id="massInvitationForm">
+            {% csrf_token %}
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Срок действия:</label>
+                <select name="expiration_time" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                    <option value="">Бессрочно</option>
+                    <option value="3600">1 час</option>
+                    <option value="14400">4 часа</option>
+                    <option value="86400">24 часа</option>
+                    <option value="172800">48 часов</option>
+                    <option value="259200">72 часа</option>
+                </select>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Количество использований:</label>
+                <input type="number" name="max_uses" min="1" placeholder="Оставьте пустым для безграничного использования"
+                       style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+            </div>
+            
+            <button type="button" onclick="createMassInvitation()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+                {% if mass_invitation_url %}Обновить ссылку{% else %}Создать ссылку{% endif %}
+            </button>
+        </form>
+        
+        <div id="massInvitationResult" style="margin-top: 15px; display: none;"></div>
+    </div>
+
+    <!-- Точечное приглашение -->
+    <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+        <h4>Точечное приглашение</h4>
+        <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+            Введите почты или уникальные коды через пробел или Enter
+        </p>
+        
+        <form id="individualInvitationForm">
+            {% csrf_token %}
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Почты или коды:</label>
+                <input type="text" id="identifiersInput" 
+                       placeholder="user1@example.com ABC123 user2@example.com"
+                       style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                
+                <div id="identifiersList" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px;"></div>
+            </div>
+            
+            <button type="button" onclick="createIndividualInvitations()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+                Отправить приглашения
+            </button>
+        </form>
+        
+        <div id="individualInvitationResult" style="margin-top: 15px; display: none;"></div>
+    </div>
+
+    <!-- Управление приглашениями -->
+    <div style="padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;">
+        <h4>Управление приглашениями</h4>
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <span>Статус массового приглашения:</span>
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" id="toggleAllInvitations" {% if mass_invitation_data.is_active %}checked{% endif %} onchange="toggleAllInvitations()" style="margin-right: 8px;">
+                <span>{% if mass_invitation_data.is_active %}Активно{% else %}Неактивно{% endif %}</span>
+            </label>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения удаления -->
+<div id="confirmKickModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <h3 style="margin-top: 0;">Подтверждение удаления</h3>
+    <p id="confirmKickMessage">Вы уверены, что хотите удалить выбранных пользователей из рабочей области?</p>
+    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+        <button type="button" onclick="closeConfirmKickModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Отмена
+        </button>
+        <button type="button" onclick="kickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Удалить
+        </button>
+    </div>
+</div>
 
             <!-- Администрирование -->
             <div id="contentAdmin" style="display: none;">
@@ -392,6 +441,150 @@ function toggleAllInvitations() {
         console.error('Error:', error);
         alert('Произошла ошибка');
         checkbox.checked = !checkbox.checked;
+    });
+}
+
+// Функционал удаления участников
+let kickMode = false;
+let selectedUsersToKick = [];
+
+// Включение/выключение режима удаления
+function toggleKickMode() {
+    kickMode = !kickMode;
+    const checkboxes = document.querySelectorAll('.kick-checkbox');
+    const kickBtn = document.getElementById('kickMembersBtn');
+    const cancelBtn = document.getElementById('cancelKickBtn');
+    const kickActions = document.getElementById('kickActions');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.style.display = kickMode ? 'block' : 'none';
+    });
+    
+    kickBtn.style.display = kickMode ? 'none' : 'block';
+    cancelBtn.style.display = kickMode ? 'block' : 'none';
+    kickActions.style.display = kickMode ? 'block' : 'none';
+    
+    if (!kickMode) {
+        selectedUsersToKick = [];
+        updateSelectedCount();
+    }
+}
+
+function cancelKickMode() {
+    kickMode = false;
+    const checkboxes = document.querySelectorAll('.kick-checkbox');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+        checkbox.style.display = 'none';
+    });
+    
+    document.getElementById('kickMembersBtn').style.display = 'block';
+    document.getElementById('cancelKickBtn').style.display = 'none';
+    document.getElementById('kickActions').style.display = 'none';
+    
+    selectedUsersToKick = [];
+    updateSelectedCount();
+}
+
+// Обновление счетчика выбранных пользователей
+function updateSelectedCount() {
+    const selectedCount = document.getElementById('selectedCount');
+    const count = selectedUsersToKick.length;
+    selectedCount.textContent = `Выбрано: ${count}`;
+}
+
+// Обработка выбора чекбоксов
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('kick-checkbox')) {
+        const userId = e.target.value;
+        
+        if (e.target.checked) {
+            if (!selectedUsersToKick.includes(userId)) {
+                selectedUsersToKick.push(userId);
+            }
+        } else {
+            const index = selectedUsersToKick.indexOf(userId);
+            if (index > -1) {
+                selectedUsersToKick.splice(index, 1);
+            }
+        }
+        
+        updateSelectedCount();
+    }
+});
+
+// Подтверждение удаления
+function confirmKickMembers() {
+    if (selectedUsersToKick.length === 0) {
+        alert('Пожалуйста, выберите хотя бы одного пользователя для удаления');
+        return;
+    }
+    
+    const confirmModal = document.getElementById('confirmKickModal');
+    const message = document.getElementById('confirmKickMessage');
+    
+    if (selectedUsersToKick.length === 1) {
+        message.textContent = 'Вы уверены, что хотите удалить выбранного пользователя из рабочей области?';
+    } else {
+        message.textContent = `Вы уверены, что хотите удалить ${selectedUsersToKick.length} пользователей из рабочей области?`;
+    }
+    
+    confirmModal.style.display = 'block';
+}
+
+function closeConfirmKickModal() {
+    document.getElementById('confirmKickModal').style.display = 'none';
+}
+
+// Удаление пользователей
+function kickMembers() {
+    const formData = new FormData();
+    selectedUsersToKick.forEach(userId => {
+        formData.append('user_ids[]', userId);
+    });
+    
+    // Добавляем CSRF токен
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    fetch(`{% url 'workspace:workspace_kick_members' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        closeConfirmKickModal();
+        
+        if (data.success) {
+            // Показываем успешное сообщение
+            let successMessage = `Успешно удалено пользователей: ${data.removed_count}`;
+            if (data.removed_users && data.removed_users.length > 0) {
+                const userNames = data.removed_users.map(user => user.username).join(', ');
+                successMessage += ` (${userNames})`;
+            }
+            // alert(successMessage);
+            
+            // Обновляем страницу
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
+            
+        } else {
+            alert(`Ошибка: ${data.error}`);
+        }
+        
+        // Показываем ошибки, если есть
+        if (data.errors && data.errors.length > 0) {
+            const errorMessage = data.errors.join('\n');
+            alert(`Ошибки:\n${errorMessage}`);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Произошла ошибка при отправке запроса');
     });
 }
 

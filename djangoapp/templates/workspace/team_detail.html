@@ -48,21 +48,88 @@
             </div>
             
             <!-- Участники -->
-            <div id="contentMembers" style="display: none;">
-                <h3>Участники команды</h3>
-                
-                <!-- Текущие участники -->
-                <div style="margin-bottom: 30px;">
-                    <h4>Текущие участники</h4>
-                    <ul>
-                        {% for member in team_members %}
-                            <li>{{ member.user }} ({{ member.get_role_display }})</li>
-                        {% empty %}
-                            <li>Нет других участников</li>
-                        {% endfor %}
-                    </ul>
-                </div>
+<div id="contentMembers" style="display: none;">
+    <h3>Участники команды</h3>
+    
+    <!-- Текущие участники -->
+    <div style="margin-bottom: 30px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0;">Текущие участники</h4>
+            <div>
+                <button id="kickMembersBtn" type="button" onclick="toggleKickMode()" style="padding: 6px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
+                    Удалить
+                </button>
+                <button id="cancelKickBtn" type="button" onclick="cancelKickMode()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;">
+                    Отменить
+                </button>
             </div>
+        </div>
+        
+        <div id="membersList">
+            {% for member in team_members %}
+                <div class="member-item" style="padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
+                    <input type="checkbox" name="kick_user_ids" value="{{ member.user.id }}" 
+                           style="margin-right: 10px; display: none;" 
+                           class="kick-checkbox"
+                           {% if member.user == request.user or member.role == 'leader' %}disabled{% endif %}>
+                    <div style="flex: 1;">
+                        {{ member.user }} ({{ member.get_role_display }})
+                        {% if member.user == request.user %}<span style="color: #666;">(Вы)</span>{% endif %}
+                    </div>
+                </div>
+            {% empty %}
+                <li>Нет других участников</li>
+            {% endfor %}
+        </div>
+        
+        <div id="kickActions" style="margin-top: 15px; display: none;">
+            <button type="button" onclick="confirmKickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Удалить выбранных
+            </button>
+            <span id="selectedCount" style="margin-left: 10px; color: #666;"></span>
+        </div>
+    </div>
+
+    <!-- Добавление участников -->
+    <div style="margin-bottom: 30px;">
+        <h4>Добавить участников из рабочей области</h4>
+        
+        <!-- Сообщения о результате -->
+        <div id="inviteResult" style="display: none; margin-bottom: 10px; padding: 10px; border-radius: 4px;"></div>
+        
+        <!-- Список пользователей рабочей области -->
+        <div style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin-bottom: 10px;">
+            {% for workspace_member in workspace_members %}
+                <div>
+                    <label style="display: block; padding: 5px;">
+                        <input type="checkbox" name="user_ids" value="{{ workspace_member.user.id }}" style="margin-right: 8px;">
+                        {{ workspace_member.user.username }} ({{ workspace_member.user.email }})
+                    </label>
+                </div>
+            {% empty %}
+                <p>Нет доступных пользователей для добавления</p>
+            {% endfor %}
+        </div>
+        
+        <button type="button" onclick="addSelectedUsers()" style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Добавить выбранных пользователей
+        </button>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения удаления -->
+<div id="confirmKickModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <h3 style="margin-top: 0;">Подтверждение удаления</h3>
+    <p id="confirmKickMessage">Вы уверены, что хотите удалить выбранных пользователей из команды?</p>
+    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+        <button type="button" onclick="closeConfirmKickModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Отмена
+        </button>
+        <button type="button" onclick="kickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Удалить
+        </button>
+    </div>
+</div>
 
             <!-- Администрирование -->
             <div id="contentAdmin" style="display: none;">
@@ -106,6 +173,242 @@ function showContent(section) {
     const contentElement = document.getElementById(`content${section.charAt(0).toUpperCase() + section.slice(1)}`);
     contentElement.style.display = 'block';
     document.getElementById(`nav${section.charAt(0).toUpperCase() + section.slice(1)}`).style.background = '#f0f0f0';
+}
+
+// Функция для добавления выбранных пользователей
+function addSelectedUsers() {
+    const selectedUsers = document.querySelectorAll('input[name="user_ids"]:checked');
+    const userIds = Array.from(selectedUsers).map(input => input.value);
+    
+    if (userIds.length === 0) {
+        showInviteResult('Пожалуйста, выберите хотя бы одного пользователя', 'error');
+        return;
+    }
+    
+    const formData = new FormData();
+    userIds.forEach(userId => {
+        formData.append('user_ids[]', userId);
+    });
+    
+    // Добавляем CSRF токен как в примере
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    fetch(`{% url 'workspace:team_invite_members' team.workspace.url_hash team.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Показываем успешное сообщение
+            let successMessage = `Успешно добавлено пользователей: ${data.added_count}`;
+            if (data.added_users && data.added_users.length > 0) {
+                const userNames = data.added_users.map(user => user.username).join(', ');
+                successMessage += ` (${userNames})`;
+            }
+            showInviteResult(successMessage, 'success');
+            
+            // Обновляем список текущих участников (можно перезагрузить страницу или обновить динамически)
+            setTimeout(() => {
+                location.reload(); // Простой способ обновить данные
+            }, 2000);
+            
+        } else {
+            showInviteResult(`Ошибка: ${data.error}`, 'error');
+        }
+        
+        // Показываем ошибки, если есть
+        if (data.errors && data.errors.length > 0) {
+            const errorMessage = data.errors.join('<br>');
+            showInviteResult(`Ошибки:<br>${errorMessage}`, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showInviteResult('Произошла ошибка при отправке запроса', 'error');
+    });
+}
+
+// Функция для показа результатов приглашения
+function showInviteResult(message, type) {
+    const resultDiv = document.getElementById('inviteResult');
+    resultDiv.innerHTML = message;
+    resultDiv.style.display = 'block';
+    
+    if (type === 'success') {
+        resultDiv.style.background = '#d4edda';
+        resultDiv.style.color = '#155724';
+        resultDiv.style.border = '1px solid #c3e6cb';
+    } else {
+        resultDiv.style.background = '#f8d7da';
+        resultDiv.style.color = '#721c24';
+        resultDiv.style.border = '1px solid #f5c6cb';
+    }
+}
+
+// Переменные для управления удалением
+let kickMode = false;
+let selectedUsersToKick = [];
+
+// Включение/выключение режима удаления
+function toggleKickMode() {
+    kickMode = !kickMode;
+    const checkboxes = document.querySelectorAll('.kick-checkbox');
+    const kickBtn = document.getElementById('kickMembersBtn');
+    const cancelBtn = document.getElementById('cancelKickBtn');
+    const kickActions = document.getElementById('kickActions');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.style.display = kickMode ? 'block' : 'none';
+    });
+    
+    kickBtn.style.display = kickMode ? 'none' : 'block';
+    cancelBtn.style.display = kickMode ? 'block' : 'none';
+    kickActions.style.display = kickMode ? 'block' : 'none';
+    
+    if (!kickMode) {
+        selectedUsersToKick = [];
+        updateSelectedCount();
+    }
+}
+
+function cancelKickMode() {
+    kickMode = false;
+    const checkboxes = document.querySelectorAll('.kick-checkbox');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+        checkbox.style.display = 'none';
+    });
+    
+    document.getElementById('kickMembersBtn').style.display = 'block';
+    document.getElementById('cancelKickBtn').style.display = 'none';
+    document.getElementById('kickActions').style.display = 'none';
+    
+    selectedUsersToKick = [];
+    updateSelectedCount();
+}
+
+// Обновление счетчика выбранных пользователей
+function updateSelectedCount() {
+    const selectedCount = document.getElementById('selectedCount');
+    const count = selectedUsersToKick.length;
+    selectedCount.textContent = `Выбрано: ${count}`;
+}
+
+// Обработка выбора чекбоксов
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('kick-checkbox')) {
+        const userId = e.target.value;
+        
+        if (e.target.checked) {
+            if (!selectedUsersToKick.includes(userId)) {
+                selectedUsersToKick.push(userId);
+            }
+        } else {
+            const index = selectedUsersToKick.indexOf(userId);
+            if (index > -1) {
+                selectedUsersToKick.splice(index, 1);
+            }
+        }
+        
+        updateSelectedCount();
+    }
+});
+
+// Подтверждение удаления
+function confirmKickMembers() {
+    if (selectedUsersToKick.length === 0) {
+        alert('Пожалуйста, выберите хотя бы одного пользователя для удаления');
+        return;
+    }
+    
+    const confirmModal = document.getElementById('confirmKickModal');
+    const message = document.getElementById('confirmKickMessage');
+    
+    if (selectedUsersToKick.length === 1) {
+        message.textContent = 'Вы уверены, что хотите удалить выбранного пользователя из команды?';
+    } else {
+        message.textContent = `Вы уверены, что хотите удалить ${selectedUsersToKick.length} пользователей из команды?`;
+    }
+    
+    confirmModal.style.display = 'block';
+}
+
+function closeConfirmKickModal() {
+    document.getElementById('confirmKickModal').style.display = 'none';
+}
+
+// Удаление пользователей
+function kickMembers() {
+    const formData = new FormData();
+    selectedUsersToKick.forEach(userId => {
+        formData.append('user_ids[]', userId);
+    });
+    
+    // Добавляем CSRF токен
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    fetch(`{% url 'workspace:team_kick_members' team.workspace.url_hash team.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        closeConfirmKickModal();
+        
+        if (data.success) {
+            // Показываем успешное сообщение
+            let successMessage = `Успешно удалено пользователей: ${data.removed_count}`;
+            if (data.removed_users && data.removed_users.length > 0) {
+                const userNames = data.removed_users.map(user => user.username).join(', ');
+                successMessage += ` (${userNames})`;
+            }
+            showKickResult(successMessage, 'success');
+            
+            // Обновляем страницу
+            setTimeout(() => {
+                location.reload();
+            }, 2000);
+            
+        } else {
+            showKickResult(`Ошибка: ${data.error}`, 'error');
+        }
+        
+        // Показываем ошибки, если есть
+        if (data.errors && data.errors.length > 0) {
+            const errorMessage = data.errors.join('<br>');
+            showKickResult(`Ошибки:<br>${errorMessage}`, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showKickResult('Произошла ошибка при отправке запроса', 'error');
+    });
+}
+
+// Функция для показа результатов удаления
+function showKickResult(message, type) {
+    // Можно использовать тот же контейнер или создать новый
+    const resultDiv = document.getElementById('inviteResult');
+    resultDiv.innerHTML = message;
+    resultDiv.style.display = 'block';
+    
+    if (type === 'success') {
+        resultDiv.style.background = '#d4edda';
+        resultDiv.style.color = '#155724';
+        resultDiv.style.border = '1px solid #c3e6cb';
+    } else {
+        resultDiv.style.background = '#f8d7da';
+        resultDiv.style.color = '#721c24';
+        resultDiv.style.border = '1px solid #f5c6cb';
+    }
 }
 </script>
 

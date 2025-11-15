@@ -23,4 +23,9 @@ urlpatterns = [
     path('<str:workspace_url_hash>/invitations/individual/create/', views.CreateIndividualInvitationsView.as_view(), name='create_individual_invitations'),
     path('<str:workspace_url_hash>/invitations/toggle-all/', views.ToggleAllInvitationsView.as_view(), name='toggle_all_invitations'),
     path('invitations/accept/<str:token>/', views.AcceptInvitationView.as_view(), name='accept_invitation'),
+    path('<str:workspace_url_hash>/team/<str:team_url_hash>/invite-members/', views.TeamInviteMemberView.as_view(), name='team_invite_members'),
+    
+    # === KICK ===
+    path('<str:workspace_url_hash>/kick-members/', views.WorkspaceKickMemberView.as_view(), name='workspace_kick_members'),
+    path('<str:workspace_url_hash>/team/<str:team_url_hash>/kick-members/', views.TeamKickMemberView.as_view(), name='team_kick_members'),
 ]
