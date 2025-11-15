@@ -12,7 +12,7 @@ from django.conf import settings
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 User = get_user_model()
-from .models import Workspace, Team, Task, IndividualInvitation
+from .models import Workspace, WorkspaceMembership, Team, TeamMembership, Task, IndividualInvitation
 from .forms import WorkspaceCreateForm, TeamCreateForm, TaskCreateForm, MassInvitationForm, IndividualInvitationForm
 from user_profile.models import UserProfile, Notification
 
@@ -23,7 +23,7 @@ class WorkspaceIndexView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         return Workspace.objects.filter(
-            Q(user=self.request.user) | Q(access_users=self.request.user)
+            workspacemembership__user=self.request.user
         ).distinct()
 
 
@@ -47,7 +47,7 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
 
     def get_queryset(self):
         return Workspace.objects.filter(
-            Q(user=self.request.user) | Q(access_users=self.request.user)
+            workspacemembership__user=self.request.user
         ).distinct()
 
     def get_context_data(self, **kwargs):
@@ -56,9 +56,17 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
         
         context['teams'] = Team.objects.filter(workspace=workspace)
         
-        if workspace.user == self.request.user:
+        # Проверяем права пользователя через WorkspaceMembership
+        user_membership = WorkspaceMembership.objects.filter(
+            workspace=workspace, 
+            user=self.request.user
+        ).first()
+        
+        # Если пользователь владелец или администратор - показываем все задачи
+        if user_membership and user_membership.role in ['owner', 'admin']:
             context['tasks'] = Task.objects.filter(workspace=workspace)
         else:
+            # Иначе показываем только задачи команд, в которых состоит пользователь
             user_teams = Team.objects.filter(
                 workspace=workspace, 
                 members=self.request.user
@@ -67,6 +75,10 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
                 workspace=workspace, 
                 team__in=user_teams
             )
+        
+        # Добавляем информацию о членах workspace
+        context['members'] = WorkspaceMembership.objects.filter(workspace=workspace).select_related('user')
+        context['user_role'] = workspace.get_user_role(self.request.user)
         
         # Добавляем данные массового приглашения в контекст
         context['mass_invitation_url'] = workspace.get_mass_invitation_url(self.request)
@@ -99,7 +111,15 @@ class TeamCreateView(LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         form.instance.workspace = self.workspace
         response = super().form_valid(form)
-        self.object.members.add(self.request.user)
+        
+        # Добавляем создателя в команду с ролью лидера
+        from .models import TeamMembership
+        TeamMembership.objects.create(
+            team=self.object,
+            user=self.request.user,
+            role='leader'
+        )
+        
         messages.success(self.request, 'Команда успешно создана!')
         return response
 
@@ -122,7 +142,7 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
 
     def get_queryset(self):
         user_workspaces = Workspace.objects.filter(
-            Q(user=self.request.user) | Q(access_users=self.request.user)
+            workspacemembership__user=self.request.user
         )
         return Team.objects.filter(
             workspace__url_hash=self.kwargs['workspace_url_hash'],
@@ -134,6 +154,7 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
         team = self.get_object()
         context['tasks'] = Task.objects.filter(team=team)
         context['is_team_member'] = team.members.filter(id=self.request.user.id).exists()
+        context['team_members'] = TeamMembership.objects.filter(team=team).select_related('user')
         return context
 
 
@@ -163,7 +184,12 @@ class TaskListView(LoginRequiredMixin, ListView):
             queryset = queryset.filter(team__url_hash=team_filter)
         
         # Права доступа
-        if self.workspace.user == self.request.user:
+        user_membership = WorkspaceMembership.objects.filter(
+            workspace=self.workspace, 
+            user=self.request.user
+        ).first()
+        
+        if user_membership and user_membership.role in ['owner', 'admin']:
             return queryset.select_related('team', 'assignee', 'reporter')
         else:
             user_teams = Team.objects.filter(
@@ -275,7 +301,12 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
         return super().dispatch(request, *args, **kwargs)
 
     def get_queryset(self):
-        if self.workspace.user == self.request.user:
+        user_membership = WorkspaceMembership.objects.filter(
+            workspace=self.workspace, 
+            user=self.request.user
+        ).first()
+        
+        if user_membership and user_membership.role in ['owner', 'admin']:
             return Task.objects.filter(workspace=self.workspace)
         else:
             user_teams = Team.objects.filter(
@@ -306,8 +337,9 @@ class CreateMassInvitationView(LoginRequiredMixin, View):
             url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем, что пользователь - администратор workspace
-        if workspace.user != request.user and request.user not in workspace.access_users.all():
+        # Проверяем, что пользователь - владелец или администратор workspace
+        user_role = workspace.get_user_role(request.user)
+        if user_role not in ['owner', 'admin']:
             return JsonResponse({'success': False, 'error': 'No permission'})
         
         form = MassInvitationForm(request.POST)
@@ -354,8 +386,9 @@ class CreateIndividualInvitationsView(LoginRequiredMixin, View):
             url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем, что пользователь - администратор workspace
-        if workspace.user != request.user and request.user not in workspace.access_users.all():
+        # Проверяем, что пользователь - владелец или администратор workspace
+        user_role = workspace.get_user_role(request.user)
+        if user_role not in ['owner', 'admin']:
             return JsonResponse({'success': False, 'error': 'No permission'})
         
         identifiers = request.POST.get('identifiers', '').strip()
@@ -387,6 +420,11 @@ class CreateIndividualInvitationsView(LoginRequiredMixin, View):
                 except UserProfile.DoesNotExist:
                     errors.append(f"Пользователь с кодом {identifier} не найден")
                     continue
+            
+            # Проверяем, не является ли пользователь уже участником workspace
+            if WorkspaceMembership.objects.filter(workspace=workspace, user=invited_user).exists():
+                errors.append(f"Пользователь {invited_user.email} уже является участником рабочей области")
+                continue
             
             # Проверяем, не приглашен ли уже этот пользователь
             existing_invitation = IndividualInvitation.objects.filter(
@@ -489,8 +527,9 @@ class ToggleAllInvitationsView(LoginRequiredMixin, View):
             url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем, что пользователь - администратор workspace
-        if workspace.user != request.user and request.user not in workspace.access_users.all():
+        # Проверяем, что пользователь - владелец или администратор workspace
+        user_role = workspace.get_user_role(request.user)
+        if user_role not in ['owner', 'admin']:
             return JsonResponse({'success': False, 'error': 'No permission'})
         
         action = request.POST.get('action')
@@ -552,8 +591,13 @@ class AcceptInvitationView(LoginRequiredMixin, View):
             messages.error(request, 'Это приглашение предназначено для другого пользователя')
             return redirect('workspace:workspace_index')
         
-        # Добавляем пользователя в workspace
-        invitation.workspace.access_users.add(request.user)
+        # Добавляем пользователя в workspace через WorkspaceMembership
+        WorkspaceMembership.objects.create(
+            workspace=invitation.workspace,
+            user=request.user,
+            role='member'  # По умолчанию добавляем как участника
+        )
+        
         invitation.status = 'accepted'
         invitation.accepted_at = timezone.now()
         invitation.save()
@@ -568,8 +612,18 @@ class AcceptInvitationView(LoginRequiredMixin, View):
         """Обрабатывает массовое приглашение"""
         print(f"DEBUG: Handling mass invitation for {workspace.name}")  # Для отладки
         
-        # Добавляем пользователя в участники
-        workspace.access_users.add(request.user)
+        # Проверяем, не является ли пользователь уже участником
+        if WorkspaceMembership.objects.filter(workspace=workspace, user=request.user).exists():
+            messages.info(request, f'Вы уже являетесь участником рабочей области {workspace.name}')
+            return redirect('workspace:workspace_detail', workspace_url_hash=workspace.url_hash)
+        
+        # Добавляем пользователя в workspace через WorkspaceMembership
+        WorkspaceMembership.objects.create(
+            workspace=workspace,
+            user=request.user,
+            role='member'  # По умолчанию добавляем как участника
+        )
+        
         workspace.mass_invitation_current_uses += 1
         workspace.save()
         
@@ -613,3 +667,22 @@ class AcceptInvitationView(LoginRequiredMixin, View):
             message=f'Вы присоединились к рабочей области "{workspace.name}" через массовое приглашение',
             level='info'
         )
+
+'''
+todo:
+    WorkspaceChangeMemberRoleView
+    TeamChangeMemberRoleView
+    WorkspaceEditView
+    TeamEditView
+
+    tags for tasks (unique words)
+    search for tasks
+    pinned tasks
+edit:
+    get_queryset in TaskListView – add filters:
+        * asigned (to me/to user if admin rules)
+        * status
+        * deadline
+        * category
+        * pinned
+'''

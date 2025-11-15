@@ -34,39 +34,18 @@
 <body style="font-family: Geologica; margin: 0;">
     {% csrf_token %}
     
-    <div style="background: #e6e6e6; padding: 10px; display: flex; justify-content: space-between;">
+    <div style="background: #e6e6e6; display: flex; justify-content: space-between; height: 50px;" class="layout_header">
         <div>
             <a href="/">main</a>
         </div>
         
         <div style="display: flex; gap: 15px;">
             {% if user.is_authenticated %}
-                <!-- Уведомления -->
                 <div style="position: relative;">
                     <button onclick="toggleNotifications()" style="background: none; border: none; cursor: pointer;">
                         🔔{% if unread_notifications_count %}({{ unread_notifications_count }}){% endif %}
                     </button>
-                    
-                    <div id="notificationsPreview" style="display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; width: 250px; max-height: 300px; overflow-y: auto; z-index: 1000;">
-                        <div style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">
-                            Уведомления
-                            {% if notifications.count > 5 %}
-                            <button onclick="showAllNotifications()" style="float: right; background: none; border: none; cursor: pointer;">Все</button>
-                            {% endif %}
-                        </div>
-                        
-                        {% for notification in recent_notifications %}
-                            <div onclick="openNotification({{ notification.id }})" 
-                                 class="notification-item {% if not notification.is_read %}notification-unread{% else %}notification-read{% endif %}">
-                                <div>{{ notification.message }}</div>
-                                <small style="color: #666;">{{ notification.created_at|date:"d.m.Y H:i" }}</small>
-                            </div>
-                        {% empty %}
-                            <div style="padding: 20px; text-align: center; color: #666;">Нет уведомлений</div>
-                        {% endfor %}
-                    </div>
                 </div>
-                
                 <a href="/workspace/">workspace</a>
                 <a href="/profile/">{{ user.username }}</a>
                 <a href="/account/logout/">logout</a>
@@ -76,6 +55,26 @@
         </div>
     </div>
 
+    <!-- Уведомления -->
+    <div id="notificationsPreview" style="display: none; position: fixed; top: 50px; right: 0; background: white; border: 1px solid #ccc; width: 250px; max-height: 300px; overflow-y: auto; z-index: 1000;">
+        <div style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">
+            Уведомления
+            {% if notifications.count > 5 %}
+            <button onclick="showAllNotifications()" style="float: right; background: none; border: none; cursor: pointer;">Все</button>
+            {% endif %}
+        </div>
+        
+        {% for notification in recent_notifications %}
+            <div onclick="openNotification({{ notification.id }})" 
+                    class="notification-item {% if not notification.is_read %}notification-unread{% else %}notification-read{% endif %}">
+                <div>{{ notification.message }}</div>
+                <small style="color: #666;">{{ notification.created_at|date:"d.m.Y H:i" }}</small>
+            </div>
+        {% empty %}
+            <div style="padding: 20px; text-align: center; color: #666;">Нет уведомлений</div>
+        {% endfor %}
+    </div>
+    
     <!-- Модальные окна -->
     <div id="allNotificationsModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
         <div style="background: white; width: 90%; max-width: 500px; margin: 50px auto; padding: 0; border-radius: 5px;">

@@ -15,11 +15,11 @@ class Workspace(models.Model):
         (259200, '72 часа'),
     ]
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    name = models.CharField(max_length=255, default='Новая рабочая область')
-    access_users = models.ManyToManyField(User, blank=True, related_name='accessible_workspaces')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='Владелец')
+    name = models.CharField(max_length=255, default='Новая рабочая область', verbose_name='Название')
+    members = models.ManyToManyField(User, through='WorkspaceMembership', related_name='workspaces')
     url_hash = models.CharField(max_length=64, unique=True, blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     
     # Поля для массового приглашения
     mass_invitation_token = models.CharField(max_length=64, unique=True, blank=True, null=True)
@@ -40,6 +40,14 @@ class Workspace(models.Model):
             self.mass_invitation_token = self.generate_mass_invitation_token()
         
         super().save(*args, **kwargs)
+        
+        # После создания workspace добавляем владельца как участника с ролью owner
+        if not WorkspaceMembership.objects.filter(workspace=self, user=self.user).exists():
+            WorkspaceMembership.objects.create(
+                workspace=self, 
+                user=self.user, 
+                role='owner'
+            )
 
     def generate_mass_invitation_token(self):
         """Генерирует новый уникальный токен для массового приглашения"""
@@ -51,15 +59,24 @@ class Workspace(models.Model):
         return f'{self.name}'
 
     def get_all_members(self):
-        """Возвращает всех участников workspace (владелец + приглашенные)"""
-        return User.objects.filter(
-            models.Q(id=self.user_id) | 
-            models.Q(accessible_workspaces=self)
-        ).distinct()
+        """Возвращает всех участников workspace"""
+        return User.objects.filter(workspacemembership__workspace=self).distinct()
     
     def has_access(self, user):
         """Проверяет, есть ли у пользователя доступ к workspace"""
-        return user == self.user or user in self.access_users.all()
+        return WorkspaceMembership.objects.filter(workspace=self, user=user).exists()
+    
+    def get_user_role(self, user):
+        """Возвращает роль пользователя в workspace"""
+        try:
+            membership = WorkspaceMembership.objects.get(workspace=self, user=user)
+            return membership.role
+        except WorkspaceMembership.DoesNotExist:
+            return None
+    
+    def is_owner(self, user):
+        """Проверяет, является ли пользователь владельцем workspace"""
+        return WorkspaceMembership.objects.filter(workspace=self, user=user, role='owner').exists()
     
     def get_mass_invitation_url(self, request):
         """Возвращает полный URL для массового приглашения"""
@@ -106,6 +123,41 @@ class Workspace(models.Model):
             self.mass_invitation_token = self.generate_mass_invitation_token()
 
 
+class WorkspaceMembership(models.Model):
+    ROLE_CHOICES = [
+        ('owner', 'Владелец'),
+        ('admin', 'Администратор'),
+        ('member', 'Участник'),
+    ]
+    
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='member')
+
+    class Meta:
+        unique_together = ['workspace', 'user']
+        verbose_name = 'Участник рабочей области'
+        verbose_name_plural = 'Участники рабочих областей'
+
+    def clean(self):
+        """Валидация данных участника workspace"""
+        # Проверяем, что может быть только один владелец
+        if self.role == 'owner':
+            existing_owner = WorkspaceMembership.objects.filter(
+                workspace=self.workspace, 
+                role='owner'
+            ).exclude(id=self.id)
+            if existing_owner.exists():
+                raise ValidationError('В рабочей области может быть только один владелец')
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.user.username} - {self.workspace.name} ({self.get_role_display()})'
+
+
 class Team(models.Model):
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
     name = models.CharField(max_length=255, default='Новая команда')
@@ -123,14 +175,33 @@ class Team(models.Model):
     def __str__(self):
         return f'{self.name}'
 
+    def clean(self):
+        """Проверяем, что все участники команды являются участниками workspace"""
+        if self.pk:
+            team_members = self.members.all()
+            workspace_members = self.workspace.get_all_members()
+            for member in team_members:
+                if member not in workspace_members:
+                    raise ValidationError(
+                        f"Участник {member.username} не является участником рабочей области"
+                    )
+
 
 class TeamMembership(models.Model):
+    ROLE_CHOICES = [
+        ('leader', 'Лидер'),
+        ('admin', 'Администратор'),
+        ('member', 'Участник'),
+    ]
+    
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    role = models.CharField(max_length=20, default='member')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='member')
 
     class Meta:
         unique_together = ['team', 'user']
+        verbose_name = 'Участник команды'
+        verbose_name_plural = 'Участники команды'
 
     def clean(self):
         """Проверяем, что пользователь является участником workspace"""
@@ -145,7 +216,7 @@ class TeamMembership(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'{self.user.username} - {self.team.name}'
+        return f'{self.user.username} - {self.team.name} ({self.get_role_display()})'
 
 
 class Task(models.Model):
@@ -220,8 +291,7 @@ class Task(models.Model):
 
         # Проверяем, что автор состоит в workspace
         if self.workspace and self.reporter:
-            workspace_members = self.workspace.get_all_members()
-            if self.reporter not in workspace_members:
+            if not self.workspace.has_access(self.reporter):
                 errors['reporter'] = 'Автор задачи должен быть участником рабочей области'
 
         # Проверяем, что команда принадлежит workspace
@@ -236,8 +306,7 @@ class Task(models.Model):
 
         # Проверяем, что исполнитель состоит в workspace (если команда не указана)
         if self.assignee and not self.team and self.workspace:
-            workspace_members = self.workspace.get_all_members()
-            if self.assignee not in workspace_members:
+            if not self.workspace.has_access(self.assignee):
                 errors['assignee'] = 'Исполнитель должен быть участником рабочей области'
 
         if errors:

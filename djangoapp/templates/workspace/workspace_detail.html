@@ -1,10 +1,16 @@
 {% extends 'layout.html' %}
 {% block content %}
-<h1>{{ workspace.name }}</h1>
+
+<div style="display: flex; flex-direction: row;">
+    <h1>{{ workspace.name }}</h1>
+
+    <!-- Кнопка управления -->
+    <button onclick="openManagement()" style="cursor: pointer; height: 40px;">Управление</button>
+</div>
 
 <!-- Количество участников -->
 <div style="cursor: pointer; color: #666; margin-bottom: 20px;" onclick="openManagementWithMembers()">
-    {% with total_members=workspace.access_users.count|add:1 %}
+    {% with total_members=workspace.members.count %}
         {{ total_members }} участник{{ total_members|pluralize:"ов" }}
     {% endwith %}
 </div>
@@ -31,9 +37,6 @@
 <h2>Задачи:</h2>
 <a href="{% url 'workspace:task_create' workspace.url_hash %}">Создать задачу</a>
 <a href="{% url 'workspace:task_list' workspace.url_hash %}">Все задачи</a>
-
-<!-- Кнопка управления -->
-<button onclick="openManagement()">Управление</button>
 
 <!-- Блок управления -->
 <div id="managementBlock" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1000; width: 80%; max-width: 800px;">
@@ -73,9 +76,8 @@
                 <div style="margin-bottom: 30px;">
                     <h4>Текущие участники</h4>
                     <ul>
-                        <li><strong>{{ workspace.user.username }}</strong> (Владелец)</li>
-                        {% for member in workspace.access_users.all %}
-                            <li>{{ member.username }} (Участник)</li>
+                        {% for member in members %}
+                            <li>{{ member.user }} ({{ member.get_role_display }})</li>
                         {% empty %}
                             <li>Нет других участников</li>
                         {% endfor %}
@@ -178,9 +180,10 @@
             <div id="contentAdmin" style="display: none;">
                 <h3>Администраторы</h3>
                 <ul>
-                    <li><strong>{{ workspace.user.username }}</strong> (Владелец)</li>
-                    {% for member in workspace.access_users.all %}
-                        <li>{{ member.username }} (Участник)</li>
+                    {% for member in members %}
+                        {% if member.get_role_display == "Владелец" or member.get_role_display == "Администратор" %}
+                            <li>{{ member.user }} ({{ member.get_role_display }})</li>
+                        {% endif %}
                     {% empty %}
                         <li>Нет других участников</li>
                     {% endfor %}

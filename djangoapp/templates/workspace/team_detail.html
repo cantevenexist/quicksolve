@@ -1,25 +1,112 @@
 {% extends 'layout.html' %}
 {% block content %}
+<div style="display: flex; flex-direction: row;">
 <h1>{{ team.name }}</h1>
+<!-- Кнопка управления -->
+<button onclick="openManagement()" style="cursor: pointer; height: 40px; margin-bottom: 20px;">Управление</button>
+</div>
 
-<!-- <h2>Задачи команды:</h2> -->
+<!-- Количество участников -->
+<div style="cursor: pointer; color: #666; margin-bottom: 20px;" onclick="openManagementWithMembers()">
+    {% with total_members=team_members.count %}
+        {{ total_members }} участник{{ total_members|pluralize:"ов" }}
+    {% endwith %}
+</div>
+
 <a href="{% url 'workspace:task_create' team.workspace.url_hash %}?team={{ team.url_hash }}">Создать задачу для этой команды</a>
 <br>
 <a href="{% url 'workspace:task_list' team.workspace.url_hash %}?team={{ team.url_hash }}">Показать все задачи команды</a>
-<!-- {% if tasks %}
-    <ul>
-    {% for task in tasks %}
-        <li>
-            <a href="{% url 'workspace:task_detail' team.workspace.url_hash task.url_hash %}">
-                {{ task.title }} ({{ task.get_status_display }})
-            </a>
-        </li>
-    {% endfor %}
-    </ul>
-{% else %}
-    <p>Нет задач в этой команде</p>
-{% endif %} -->
+
+<!-- Блок управления -->
+<div id="managementBlock" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1000; width: 80%; max-width: 800px;">
+    <div style="position: absolute; top: 10px; right: 10px; cursor: pointer;" onclick="closeManagement()">✕</div>
+    
+    <div style="display: flex;">
+        <!-- Навигация -->
+        <div style="width: 30%; border-right: 1px solid #ccc; padding-right: 20px;">
+            <div id="navMain" style="cursor: pointer; padding: 10px; background: #f0f0f0;" onclick="showContent('main')">Главное</div>
+            <div id="navMembers" style="cursor: pointer; padding: 10px;" onclick="showContent('members')">Участники</div>
+            <div id="navAdmin" style="cursor: pointer; padding: 10px;" onclick="showContent('admin')">Администрирование</div>
+        </div>
+        
+        <!-- Контент -->
+        <div style="width: 70%; padding-left: 20px;">
+            <!-- Главное -->
+            <div id="contentMain" style="display: block;">
+                <h3>Основные настройки</h3>
+                <form>
+                    <div>
+                        <label>Название:</label>
+                        <input type="text" value="{{ team.name }}" style="width: 100%; margin-bottom: 10px;">
+                    </div>
+                    <div>
+                        <label>Описание:</label>
+                        <textarea style="width: 100%; height: 100px; margin-bottom: 10px;">{{ team.description|default:'' }}</textarea>
+                    </div>
+                    <button type="button">Сохранить</button>
+                </form>
+            </div>
+            
+            <!-- Участники -->
+            <div id="contentMembers" style="display: none;">
+                <h3>Участники команды</h3>
+                
+                <!-- Текущие участники -->
+                <div style="margin-bottom: 30px;">
+                    <h4>Текущие участники</h4>
+                    <ul>
+                        {% for member in team_members %}
+                            <li>{{ member.user }} ({{ member.get_role_display }})</li>
+                        {% empty %}
+                            <li>Нет других участников</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Администрирование -->
+            <div id="contentAdmin" style="display: none;">
+                <h3>Администраторы команды</h3>
+                <ul>
+                    {% for member in team_members %}
+                        {% if member.get_role_display == "Лидер" or member.get_role_display == "Администратор" %}
+                            <li>{{ member.user }} ({{ member.get_role_display }})</li>
+                        {% endif %}
+                    {% empty %}
+                        <li>Нет администраторов</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
 <br>
 <a href="{% url 'workspace:workspace_detail' team.workspace.url_hash %}">Назад к рабочей области</a>
+
+<script>
+// Управление модальным окном
+function openManagement() {
+    document.getElementById('managementBlock').style.display = 'block';
+}
+
+function closeManagement() {
+    document.getElementById('managementBlock').style.display = 'none';
+}
+
+function openManagementWithMembers() {
+    document.getElementById('managementBlock').style.display = 'block';
+    showContent('members');
+}
+
+function showContent(section) {
+    document.querySelectorAll('[id^="content"]').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('[id^="nav"]').forEach(el => el.style.background = '');
+    
+    const contentElement = document.getElementById(`content${section.charAt(0).toUpperCase() + section.slice(1)}`);
+    contentElement.style.display = 'block';
+    document.getElementById(`nav${section.charAt(0).toUpperCase() + section.slice(1)}`).style.background = '#f0f0f0';
+}
+</script>
 
 {% endblock %}
