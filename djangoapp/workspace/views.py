@@ -56,11 +56,14 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
         
         context['teams'] = Team.objects.filter(workspace=workspace)
         
-        # Проверяем права пользователя через WorkspaceMembership
+        # Получаем membership текущего пользователя
         user_membership = WorkspaceMembership.objects.filter(
             workspace=workspace, 
             user=self.request.user
         ).first()
+        
+        # Добавляем user_membership в контекст
+        context['user_membership'] = user_membership
         
         # Если пользователь владелец или администратор - показываем все задачи
         if user_membership and user_membership.role in ['owner', 'admin']:
@@ -176,12 +179,18 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
             user=self.request.user
         ).first()
         
+        # Получаем списки пользователей для назначения и разжалования
+        members_for_promotion = [member for member in team_members if member.role == 'member']
+        members_for_demotion = [member for member in team_members if member.role == 'admin']
+        
         context['tasks'] = Task.objects.filter(team=team)
         context['is_team_member'] = team.members.filter(id=self.request.user.id).exists()
         context['team_members'] = team_members
         context['workspace_members'] = available_users
         context['team_members_users'] = [member.user for member in team_members]
         context['user_membership'] = user_membership  # Добавляем информацию о текущем пользователе
+        context['members_for_promotion'] = members_for_promotion  # Участники для назначения администраторами
+        context['members_for_demotion'] = members_for_demotion    # Администраторы для разжалования
         
         return context
 
@@ -938,7 +947,7 @@ class WorkspaceKickMemberView(LoginRequiredMixin, View):
             message=message,
             level='info'
         )
-        
+
 class TeamKickMemberView(LoginRequiredMixin, View):
     """Удаление пользователей из команды"""
     
@@ -1066,16 +1075,291 @@ class TeamKickMemberView(LoginRequiredMixin, View):
             message=message,
             level='info'
         )
+
+class WorkspaceChangeMemberRoleView(LoginRequiredMixin, View):
+    """Изменение ролей участников рабочей области"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        workspace = get_object_or_404(
+            Workspace, 
+            url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, что пользователь - владелец рабочей области
+        user_membership = WorkspaceMembership.objects.filter(
+            workspace=workspace,
+            user=request.user
+        ).first()
+        
+        if not user_membership or user_membership.role != 'owner':
+            return JsonResponse({'success': False, 'error': 'No permission'})
+        
+        user_ids = request.POST.getlist('user_ids[]')
+        action = request.POST.get('action')  # 'promote' or 'demote'
+        
+        if not user_ids:
+            return JsonResponse({'success': False, 'error': 'No users selected'})
+        
+        if action not in ['promote', 'demote']:
+            return JsonResponse({'success': False, 'error': 'Invalid action'})
+        
+        updated_users = []
+        errors = []
+        
+        for user_id in user_ids:
+            try:
+                user_to_update = User.objects.get(id=user_id)
+                
+                # Проверяем, что пользователь действительно в рабочей области
+                membership = WorkspaceMembership.objects.filter(
+                    workspace=workspace, 
+                    user=user_to_update
+                ).first()
+                
+                if not membership:
+                    errors.append(f"Пользователь {user_to_update.username} не состоит в рабочей области")
+                    continue
+                
+                # Не позволяем изменять роль себе
+                if user_to_update == request.user:
+                    errors.append(f"Нельзя изменить свою собственную роль")
+                    continue
+                
+                # Выполняем действие
+                if action == 'promote':
+                    if membership.role == 'member':
+                        membership.role = 'admin'
+                        membership.save()
+                        updated_users.append({
+                            'id': user_to_update.id,
+                            'username': user_to_update.username,
+                            'old_role': 'member',
+                            'new_role': 'admin'
+                        })
+                    else:
+                        errors.append(f"Пользователь {user_to_update.username} уже является администратором")
+                
+                elif action == 'demote':
+                    if membership.role == 'admin':
+                        membership.role = 'member'
+                        membership.save()
+                        updated_users.append({
+                            'id': user_to_update.id,
+                            'username': user_to_update.username,
+                            'old_role': 'admin',
+                            'new_role': 'member'
+                        })
+                    else:
+                        errors.append(f"Пользователь {user_to_update.username} не является администратором")
+                
+            except User.DoesNotExist:
+                errors.append(f"Пользователь с ID {user_id} не найден")
+                continue
+        
+        # Создаем уведомления
+        if updated_users:
+            self.create_role_change_notifications(request.user, updated_users, workspace, action)
+        
+        return JsonResponse({
+            'success': True,
+            'updated_count': len(updated_users),
+            'updated_users': updated_users,
+            'errors': errors
+        })
+    
+    def create_role_change_notifications(self, changer, updated_users, workspace, action):
+        """Создает уведомления об изменении ролей"""
+        for updated_user in updated_users:
+            if action == 'promote':
+                message = f'Вам назначена роль администратора в рабочей области "{workspace.name}"'
+            else:
+                message = f'Вы разжалованы до участника в рабочей области "{workspace.name}"'
+            
+            Notification.objects.create(
+                user_id=updated_user['id'],
+                message=message,
+                level='info'
+            )
+        
+        # Уведомление для того, кто изменил роли
+        if len(updated_users) == 1:
+            updated_user = updated_users[0]
+            if action == 'promote':
+                message = f'Вы назначили пользователя {updated_user["username"]} администратором'
+            else:
+                message = f'Вы разжаловали пользователя {updated_user["username"]} до участника'
+        else:
+            if action == 'promote':
+                message = f'Вы назначили {len(updated_users)} пользователей администраторами'
+            else:
+                message = f'Вы разжаловали {len(updated_users)} пользователей до участников'
+        
+        Notification.objects.create(
+            user=changer,
+            message=message,
+            level='info'
+        )
+
+class TeamChangeMemberRoleView(LoginRequiredMixin, View):
+    """Изменение ролей участников команды"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        team = get_object_or_404(
+            Team, 
+            url_hash=kwargs['team_url_hash'],
+            workspace__url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, что пользователь - лидер команды
+        user_membership = TeamMembership.objects.filter(
+            team=team,
+            user=request.user
+        ).first()
+        
+        if not user_membership or user_membership.role != 'leader':
+            return JsonResponse({'success': False, 'error': 'No permission'})
+        
+        user_ids = request.POST.getlist('user_ids[]')
+        action = request.POST.get('action')  # 'promote' or 'demote'
+        
+        if not user_ids:
+            return JsonResponse({'success': False, 'error': 'No users selected'})
+        
+        if action not in ['promote', 'demote']:
+            return JsonResponse({'success': False, 'error': 'Invalid action'})
+        
+        updated_users = []
+        errors = []
+        
+        for user_id in user_ids:
+            try:
+                user_to_update = User.objects.get(id=user_id)
+                
+                # Проверяем, что пользователь действительно в команде
+                membership = TeamMembership.objects.filter(
+                    team=team, 
+                    user=user_to_update
+                ).first()
+                
+                if not membership:
+                    errors.append(f"Пользователь {user_to_update.username} не состоит в команде")
+                    continue
+                
+                # Не позволяем изменять роль себе
+                if user_to_update == request.user:
+                    errors.append(f"Нельзя изменить свою собственную роль")
+                    continue
+                
+                # Выполняем действие
+                if action == 'promote':
+                    if membership.role == 'member':
+                        membership.role = 'admin'
+                        membership.save()
+                        updated_users.append({
+                            'id': user_to_update.id,
+                            'username': user_to_update.username,
+                            'old_role': 'member',
+                            'new_role': 'admin'
+                        })
+                    else:
+                        errors.append(f"Пользователь {user_to_update.username} уже является администратором")
+                
+                elif action == 'demote':
+                    if membership.role == 'admin':
+                        membership.role = 'member'
+                        membership.save()
+                        updated_users.append({
+                            'id': user_to_update.id,
+                            'username': user_to_update.username,
+                            'old_role': 'admin',
+                            'new_role': 'member'
+                        })
+                    else:
+                        errors.append(f"Пользователь {user_to_update.username} не является администратором")
+                
+            except User.DoesNotExist:
+                errors.append(f"Пользователь с ID {user_id} не найден")
+                continue
+        
+        # Создаем уведомления
+        if updated_users:
+            self.create_role_change_notifications(request.user, updated_users, team, action)
+        
+        return JsonResponse({
+            'success': True,
+            'updated_count': len(updated_users),
+            'updated_users': updated_users,
+            'errors': errors
+        })
+    
+    def create_role_change_notifications(self, changer, updated_users, team, action):
+        """Создает уведомления об изменении ролей"""
+        for updated_user in updated_users:
+            if action == 'promote':
+                message = f'Вам назначена роль администратора в команде "{team.name}"'
+            else:
+                message = f'Вы разжалованы до участника в команде "{team.name}"'
+            
+            Notification.objects.create(
+                user_id=updated_user['id'],
+                message=message,
+                level='info'
+            )
+        
+        # Уведомление для того, кто изменил роли
+        if len(updated_users) == 1:
+            updated_user = updated_users[0]
+            if action == 'promote':
+                message = f'Вы назначили пользователя {updated_user["username"]} администратором команды "{team.name}"'
+            else:
+                message = f'Вы разжаловали пользователя {updated_user["username"]} до участника команды "{team.name}"'
+        else:
+            if action == 'promote':
+                message = f'Вы назначили {len(updated_users)} пользователей администраторами команды "{team.name}"'
+            else:
+                message = f'Вы разжаловали {len(updated_users)} пользователей до участников команды "{team.name}"'
+        
+        Notification.objects.create(
+            user=changer,
+            message=message,
+            level='info'
+        )
 '''
 todo:
-    WorkspaceChangeMemberRoleView
-    TeamChangeMemberRoleView
-    WorkspaceEditView
-    TeamEditView
+    ✅ WorkspaceChangeMemberRoleView
+    ✅ TeamChangeMemberRoleView
+    
+    ⚡️ role system:
+        * set who can create team
+        * set who can create task
 
-    tags for tasks (unique words)
-    search for tasks
-    pinned tasks
+        * set who can edit workspace
+        * set who can edit task
+
+        * set team visible to uninvited members
+
+        * GetOutWorkspaceView
+        * GetOutTeamView
+    
+    
+    ✏️ medium important:
+        * WorkspaceEditView
+        * TeamEditView
+        * ProfileAvatar
+        * WorkspaceAvatar
+        * TeamAvatar
+
+    ⚡️ important:
+        * tags for tasks (unique words)
+        * search for tasks
+        * pinned tasks
+
 edit:
     get_queryset in TaskListView – add filters:
         * asigned (to me/to user if admin rules)

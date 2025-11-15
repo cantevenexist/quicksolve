@@ -228,17 +228,135 @@
             <!-- Администрирование -->
             <div id="contentAdmin" style="display: none;">
                 <h3>Администраторы</h3>
-                <ul>
-                    {% for member in members %}
-                        {% if member.get_role_display == "Владелец" or member.get_role_display == "Администратор" %}
-                            <li>{{ member.user }} ({{ member.get_role_display }})</li>
-                        {% endif %}
-                    {% empty %}
-                        <li>Нет других участников</li>
-                    {% endfor %}
-                </ul>
+                
+                <!-- Назначение администраторов -->
+                {% if user_membership.role == 'owner' %}
+                <div style="margin-bottom: 30px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h4 style="margin: 0;">Назначить администраторов</h4>
+                        <div>
+                            <button id="promoteMembersBtn" type="button" onclick="togglePromoteMode()" style="padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
+                                Назначить
+                            </button>
+                            <button id="cancelPromoteBtn" type="button" onclick="cancelPromoteMode()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;">
+                                Отменить
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="promoteMembersList">
+                        {% for member in members %}
+                            {% if member.role == 'member' %}
+                                <div class="promote-member-item" style="padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
+                                    <input type="checkbox" name="promote_user_ids" value="{{ member.user.id }}" 
+                                           style="margin-right: 10px; display: none;" 
+                                           class="promote-checkbox"
+                                           data-username="{{ member.user.username }}">
+                                    <div style="flex: 1;">
+                                        {{ member.user }} ({{ member.get_role_display }})
+                                    </div>
+                                </div>
+                            {% endif %}
+                        {% empty %}
+                            <li>Нет обычных участников</li>
+                        {% endfor %}
+                    </div>
+                    
+                    <div id="promoteActions" style="margin-top: 15px; display: none;">
+                        <button type="button" onclick="confirmPromoteMembers()" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            Назначить выбранных
+                        </button>
+                        <span id="promoteSelectedCount" style="margin-left: 10px; color: #666;"></span>
+                    </div>
+                </div>
+
+                <!-- Разжалование администраторов -->
+                <div style="margin-bottom: 30px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h4 style="margin: 0;">Разжаловать администраторов</h4>
+                        <div>
+                            <button id="demoteMembersBtn" type="button" onclick="toggleDemoteMode()" style="padding: 6px 12px; background: #ffc107; color: black; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
+                                Разжаловать
+                            </button>
+                            <button id="cancelDemoteBtn" type="button" onclick="cancelDemoteMode()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;">
+                                Отменить
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="demoteMembersList">
+                        {% for member in members %}
+                            {% if member.role == 'admin' %}
+                                <div class="demote-member-item" style="padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
+                                    <input type="checkbox" name="demote_user_ids" value="{{ member.user.id }}" 
+                                           style="margin-right: 10px; display: none;" 
+                                           class="demote-checkbox"
+                                           data-username="{{ member.user.username }}">
+                                    <div style="flex: 1;">
+                                        {{ member.user }} ({{ member.get_role_display }})
+                                    </div>
+                                </div>
+                            {% endif %}
+                        {% empty %}
+                            <li>Нет администраторов</li>
+                        {% endfor %}
+                    </div>
+                    
+                    <div id="demoteActions" style="margin-top: 15px; display: none;">
+                        <button type="button" onclick="confirmDemoteMembers()" style="padding: 8px 16px; background: #ffc107; color: black; border: none; border-radius: 4px; cursor: pointer;">
+                            Разжаловать выбранных
+                        </button>
+                        <span id="demoteSelectedCount" style="margin-left: 10px; color: #666;"></span>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Список администраторов -->
+                <div>
+                    <h4>Текущие администраторы</h4>
+                    <ul>
+                        {% for member in members %}
+                            {% if member.get_role_display == "Владелец" or member.get_role_display == "Администратор" %}
+                                <li>
+                                    {{ member.user }} ({{ member.get_role_display }})
+                                    {% if member.user == request.user %}<span style="color: #666;">(Вы)</span>{% endif %}
+                                </li>
+                            {% endif %}
+                        {% empty %}
+                            <li>Нет других участников</li>
+                        {% endfor %}
+                    </ul>
+                </div>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения назначения -->
+<div id="confirmPromoteModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <h3 style="margin-top: 0;">Подтверждение назначения</h3>
+    <p id="confirmPromoteMessage">Вы уверены, что хотите назначить выбранных пользователей администраторами?</p>
+    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+        <button type="button" onclick="closeConfirmPromoteModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Отмена
+        </button>
+        <button type="button" onclick="promoteMembers()" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Назначить
+        </button>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения разжалования -->
+<div id="confirmDemoteModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <h3 style="margin-top: 0;">Подтверждение разжалования</h3>
+    <p id="confirmDemoteMessage">Вы уверены, что хотите разжаловать выбранных администраторов?</p>
+    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+        <button type="button" onclick="closeConfirmDemoteModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Отмена
+        </button>
+        <button type="button" onclick="demoteMembers()" style="padding: 8px 16px; background: #ffc107; color: black; border: none; border-radius: 4px; cursor: pointer;">
+            Разжаловать
+        </button>
     </div>
 </div>
 
@@ -566,6 +684,292 @@ function kickMembers() {
                 successMessage += ` (${userNames})`;
             }
             // alert(successMessage);
+            
+            // Обновляем страницу
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
+            
+        } else {
+            alert(`Ошибка: ${data.error}`);
+        }
+        
+        // Показываем ошибки, если есть
+        if (data.errors && data.errors.length > 0) {
+            const errorMessage = data.errors.join('\n');
+            alert(`Ошибки:\n${errorMessage}`);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Произошла ошибка при отправке запроса');
+    });
+}
+
+// Функционал управления ролями
+let promoteMode = false;
+let demoteMode = false;
+let selectedUsersToPromote = [];
+let selectedUsersToDemote = [];
+
+// Назначение администраторов
+function togglePromoteMode() {
+    promoteMode = !promoteMode;
+    const checkboxes = document.querySelectorAll('.promote-checkbox');
+    const promoteBtn = document.getElementById('promoteMembersBtn');
+    const cancelBtn = document.getElementById('cancelPromoteBtn');
+    const promoteActions = document.getElementById('promoteActions');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.style.display = promoteMode ? 'block' : 'none';
+    });
+    
+    promoteBtn.style.display = promoteMode ? 'none' : 'block';
+    cancelBtn.style.display = promoteMode ? 'block' : 'none';
+    promoteActions.style.display = promoteMode ? 'block' : 'none';
+    
+    if (!promoteMode) {
+        selectedUsersToPromote = [];
+        updatePromoteSelectedCount();
+    }
+}
+
+function cancelPromoteMode() {
+    promoteMode = false;
+    const checkboxes = document.querySelectorAll('.promote-checkbox');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+        checkbox.style.display = 'none';
+    });
+    
+    document.getElementById('promoteMembersBtn').style.display = 'block';
+    document.getElementById('cancelPromoteBtn').style.display = 'none';
+    document.getElementById('promoteActions').style.display = 'none';
+    
+    selectedUsersToPromote = [];
+    updatePromoteSelectedCount();
+}
+
+function updatePromoteSelectedCount() {
+    const selectedCount = document.getElementById('promoteSelectedCount');
+    const count = selectedUsersToPromote.length;
+    selectedCount.textContent = `Выбрано: ${count}`;
+}
+
+// Разжалование администраторов
+function toggleDemoteMode() {
+    demoteMode = !demoteMode;
+    const checkboxes = document.querySelectorAll('.demote-checkbox');
+    const demoteBtn = document.getElementById('demoteMembersBtn');
+    const cancelBtn = document.getElementById('cancelDemoteBtn');
+    const demoteActions = document.getElementById('demoteActions');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.style.display = demoteMode ? 'block' : 'none';
+    });
+    
+    demoteBtn.style.display = demoteMode ? 'none' : 'block';
+    cancelBtn.style.display = demoteMode ? 'block' : 'none';
+    demoteActions.style.display = demoteMode ? 'block' : 'none';
+    
+    if (!demoteMode) {
+        selectedUsersToDemote = [];
+        updateDemoteSelectedCount();
+    }
+}
+
+function cancelDemoteMode() {
+    demoteMode = false;
+    const checkboxes = document.querySelectorAll('.demote-checkbox');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+        checkbox.style.display = 'none';
+    });
+    
+    document.getElementById('demoteMembersBtn').style.display = 'block';
+    document.getElementById('cancelDemoteBtn').style.display = 'none';
+    document.getElementById('demoteActions').style.display = 'none';
+    
+    selectedUsersToDemote = [];
+    updateDemoteSelectedCount();
+}
+
+function updateDemoteSelectedCount() {
+    const selectedCount = document.getElementById('demoteSelectedCount');
+    const count = selectedUsersToDemote.length;
+    selectedCount.textContent = `Выбрано: ${count}`;
+}
+
+// Обработка выбора чекбоксов для назначения
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('promote-checkbox')) {
+        const userId = e.target.value;
+        
+        if (e.target.checked) {
+            if (!selectedUsersToPromote.includes(userId)) {
+                selectedUsersToPromote.push(userId);
+            }
+        } else {
+            const index = selectedUsersToPromote.indexOf(userId);
+            if (index > -1) {
+                selectedUsersToPromote.splice(index, 1);
+            }
+        }
+        
+        updatePromoteSelectedCount();
+    }
+});
+
+// Обработка выбора чекбоксов для разжалования
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('demote-checkbox')) {
+        const userId = e.target.value;
+        
+        if (e.target.checked) {
+            if (!selectedUsersToDemote.includes(userId)) {
+                selectedUsersToDemote.push(userId);
+            }
+        } else {
+            const index = selectedUsersToDemote.indexOf(userId);
+            if (index > -1) {
+                selectedUsersToDemote.splice(index, 1);
+            }
+        }
+        
+        updateDemoteSelectedCount();
+    }
+});
+
+// Подтверждение назначения
+function confirmPromoteMembers() {
+    if (selectedUsersToPromote.length === 0) {
+        alert('Пожалуйста, выберите хотя бы одного пользователя для назначения');
+        return;
+    }
+    
+    const confirmModal = document.getElementById('confirmPromoteModal');
+    const message = document.getElementById('confirmPromoteMessage');
+    
+    if (selectedUsersToPromote.length === 1) {
+        message.textContent = 'Вы уверены, что хотите назначить выбранного пользователя администратором?';
+    } else {
+        message.textContent = `Вы уверены, что хотите назначить ${selectedUsersToPromote.length} пользователей администраторами?`;
+    }
+    
+    confirmModal.style.display = 'block';
+}
+
+function closeConfirmPromoteModal() {
+    document.getElementById('confirmPromoteModal').style.display = 'none';
+}
+
+// Подтверждение разжалования
+function confirmDemoteMembers() {
+    if (selectedUsersToDemote.length === 0) {
+        alert('Пожалуйста, выберите хотя бы одного администратора для разжалования');
+        return;
+    }
+    
+    const confirmModal = document.getElementById('confirmDemoteModal');
+    const message = document.getElementById('confirmDemoteMessage');
+    
+    if (selectedUsersToDemote.length === 1) {
+        message.textContent = 'Вы уверены, что хотите разжаловать выбранного администратора?';
+    } else {
+        message.textContent = `Вы уверены, что хотите разжаловать ${selectedUsersToDemote.length} администраторов?`;
+    }
+    
+    confirmModal.style.display = 'block';
+}
+
+function closeConfirmDemoteModal() {
+    document.getElementById('confirmDemoteModal').style.display = 'none';
+}
+
+// Назначение администраторов
+function promoteMembers() {
+    const formData = new FormData();
+    selectedUsersToPromote.forEach(userId => {
+        formData.append('user_ids[]', userId);
+    });
+    formData.append('action', 'promote');
+    
+    // Добавляем CSRF токен
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    fetch(`{% url 'workspace:workspace_change_member_role' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        closeConfirmPromoteModal();
+        
+        if (data.success) {
+            // Показываем успешное сообщение
+            let successMessage = `Успешно назначено администраторов: ${data.updated_count}`;
+            if (data.updated_users && data.updated_users.length > 0) {
+                const userNames = data.updated_users.map(user => user.username).join(', ');
+                successMessage += ` (${userNames})`;
+            }
+            alert(successMessage);
+            
+            // Обновляем страницу
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
+            
+        } else {
+            alert(`Ошибка: ${data.error}`);
+        }
+        
+        // Показываем ошибки, если есть
+        if (data.errors && data.errors.length > 0) {
+            const errorMessage = data.errors.join('\n');
+            alert(`Ошибки:\n${errorMessage}`);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Произошла ошибка при отправке запроса');
+    });
+}
+
+// Разжалование администраторов
+function demoteMembers() {
+    const formData = new FormData();
+    selectedUsersToDemote.forEach(userId => {
+        formData.append('user_ids[]', userId);
+    });
+    formData.append('action', 'demote');
+    
+    // Добавляем CSRF токен
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    fetch(`{% url 'workspace:workspace_change_member_role' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        closeConfirmDemoteModal();
+        
+        if (data.success) {
+            // Показываем успешное сообщение
+            let successMessage = `Успешно разжаловано администраторов: ${data.updated_count}`;
+            if (data.updated_users && data.updated_users.length > 0) {
+                const userNames = data.updated_users.map(user => user.username).join(', ');
+                successMessage += ` (${userNames})`;
+            }
+            alert(successMessage);
             
             // Обновляем страницу
             setTimeout(() => {

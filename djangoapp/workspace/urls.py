@@ -28,4 +28,8 @@ urlpatterns = [
     # === KICK ===
     path('<str:workspace_url_hash>/kick-members/', views.WorkspaceKickMemberView.as_view(), name='workspace_kick_members'),
     path('<str:workspace_url_hash>/team/<str:team_url_hash>/kick-members/', views.TeamKickMemberView.as_view(), name='team_kick_members'),
+
+    # === ROLE ===
+    path('<str:workspace_url_hash>/change-member-role/', views.WorkspaceChangeMemberRoleView.as_view(), name='workspace_change_member_role'),
+    path('<str:workspace_url_hash>/team/<str:team_url_hash>/change-member-role/', views.TeamChangeMemberRoleView.as_view(), name='team_change_member_role'),
 ]
