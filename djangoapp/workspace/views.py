@@ -11,8 +11,9 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.urls import reverse
 from django.contrib.auth import get_user_model
+import json
 User = get_user_model()
-from .models import Workspace, WorkspaceMembership, Team, TeamMembership, Task, IndividualInvitation
+from .models import Workspace, WorkspaceMembership, Team, TeamMembership, Task, IndividualInvitation, WorkspaceRoleAccess, TeamRoleAccess
 from .forms import WorkspaceCreateForm, TeamCreateForm, TaskCreateForm, MassInvitationForm, IndividualInvitationForm
 from user_profile.models import UserProfile, Notification
 
@@ -35,8 +36,13 @@ class WorkspaceCreateView(LoginRequiredMixin, CreateView):
 
     def form_valid(self, form):
         form.instance.user = self.request.user
+        response = super().form_valid(form)
+        
+        # Создаем настройки прав доступа по умолчанию для workspace
+        WorkspaceRoleAccess.objects.create(workspace=self.object)
+        
         messages.success(self.request, 'Рабочая область успешно создана!')
-        return super().form_valid(form)
+        return response
 
 
 class WorkspaceDetailView(LoginRequiredMixin, DetailView):
@@ -54,7 +60,28 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         workspace = self.get_object()
         
-        context['teams'] = Team.objects.filter(workspace=workspace)
+        # Получаем настройки прав доступа
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
+        context['role_access'] = role_access
+        
+        # Получаем команды с учетом видимости
+        user_teams = Team.objects.filter(
+            workspace=workspace,
+            teammembership__user=self.request.user
+        )
+        
+        # Все команды workspace для владельцев и администраторов
+        if workspace.get_user_role(self.request.user) in ['owner', 'admin']:
+            context['teams'] = Team.objects.filter(workspace=workspace)
+        else:
+            # Для обычных пользователей - только команды, которые они видят
+            visible_teams = []
+            all_teams = Team.objects.filter(workspace=workspace)
+            for team in all_teams:
+                team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+                if team_access.is_team_visible_to_user(self.request.user):
+                    visible_teams.append(team)
+            context['teams'] = visible_teams
         
         # Получаем membership текущего пользователя
         user_membership = WorkspaceMembership.objects.filter(
@@ -65,15 +92,11 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
         # Добавляем user_membership в контекст
         context['user_membership'] = user_membership
         
-        # Если пользователь владелец или администратор - показываем все задачи
-        if user_membership and user_membership.role in ['owner', 'admin']:
+        # Проверяем права доступа для задач
+        if role_access.has_permission(self.request.user, 'can_view_all_tasks'):
             context['tasks'] = Task.objects.filter(workspace=workspace)
         else:
-            # Иначе показываем только задачи команд, в которых состоит пользователь
-            user_teams = Team.objects.filter(
-                workspace=workspace, 
-                members=self.request.user
-            )
+            # Показываем только задачи команд, в которых состоит пользователь
             context['tasks'] = Task.objects.filter(
                 workspace=workspace, 
                 team__in=user_teams
@@ -106,9 +129,13 @@ class TeamCreateView(LoginRequiredMixin, CreateView):
             Workspace, 
             url_hash=kwargs['workspace_url_hash']
         )
-        if not self.workspace.has_access(request.user):
+        
+        # Проверяем право на создание команд
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        if not role_access.has_permission(request.user, 'can_create_teams'):
             from django.http import Http404
-            raise Http404("У вас нет доступа к этой рабочей области")
+            raise Http404("У вас нет прав для создания команд")
+            
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
@@ -116,12 +143,14 @@ class TeamCreateView(LoginRequiredMixin, CreateView):
         response = super().form_valid(form)
         
         # Добавляем создателя в команду с ролью лидера
-        from .models import TeamMembership
         TeamMembership.objects.create(
             team=self.object,
             user=self.request.user,
             role='leader'
         )
+        
+        # Создаем настройки прав доступа по умолчанию для команды
+        TeamRoleAccess.objects.create(team=self.object)
         
         messages.success(self.request, 'Команда успешно создана!')
         return response
@@ -143,6 +172,21 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
     slug_field = 'url_hash'
     slug_url_kwarg = 'team_url_hash'
 
+    def dispatch(self, request, *args, **kwargs):
+        # Проверяем видимость команды
+        team = get_object_or_404(
+            Team,
+            url_hash=kwargs['team_url_hash'],
+            workspace__url_hash=kwargs['workspace_url_hash']
+        )
+        
+        team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+        if not team_access.is_team_visible_to_user(request.user):
+            from django.http import Http404
+            raise Http404("У вас нет доступа к этой команде")
+            
+        return super().dispatch(request, *args, **kwargs)
+
     def get_queryset(self):
         user_workspaces = Workspace.objects.filter(
             workspacemembership__user=self.request.user
@@ -155,6 +199,10 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         team = self.get_object()
+        
+        # Получаем настройки прав доступа команды
+        team_access, created = TeamRoleAccess.objects.get_or_create(team=team)
+        context['team_access'] = team_access
         
         # Получаем текущих участников команды
         team_members = TeamMembership.objects.filter(team=team).select_related('user')
@@ -220,13 +268,10 @@ class TaskListView(LoginRequiredMixin, ListView):
         if team_filter:
             queryset = queryset.filter(team__url_hash=team_filter)
         
-        # Права доступа
-        user_membership = WorkspaceMembership.objects.filter(
-            workspace=self.workspace, 
-            user=self.request.user
-        ).first()
+        # Права доступа через WorkspaceRoleAccess
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
         
-        if user_membership and user_membership.role in ['owner', 'admin']:
+        if role_access.has_permission(self.request.user, 'can_view_all_tasks'):
             return queryset.select_related('team', 'assignee', 'reporter')
         else:
             user_teams = Team.objects.filter(
@@ -240,7 +285,22 @@ class TaskListView(LoginRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['workspace'] = self.workspace
-        context['teams'] = Team.objects.filter(workspace=self.workspace)
+        
+        # Получаем настройки прав доступа
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        context['role_access'] = role_access
+        
+        # Получаем команды с учетом видимости
+        if role_access.has_permission(self.request.user, 'can_view_all_teams'):
+            context['teams'] = Team.objects.filter(workspace=self.workspace)
+        else:
+            visible_teams = []
+            all_teams = Team.objects.filter(workspace=self.workspace)
+            for team in all_teams:
+                team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+                if team_access.is_team_visible_to_user(self.request.user):
+                    visible_teams.append(team)
+            context['teams'] = visible_teams
         
         # Добавляем выбранную команду для фильтрации
         selected_team = self.request.GET.get('team')
@@ -260,10 +320,13 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
             Workspace, 
             url_hash=kwargs['workspace_url_hash']
         )
-        if not self.workspace.has_access(request.user):
-            from django.http import Http404
-            raise Http404("У вас нет доступа к этой рабочей области")
         
+        # Проверяем право на создание задач
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        if not role_access.has_permission(request.user, 'can_create_tasks'):
+            from django.http import Http404
+            raise Http404("У вас нет прав для создания задач")
+            
         return super().dispatch(request, *args, **kwargs)
 
     def get_form_kwargs(self):
@@ -304,6 +367,10 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
         context = super().get_context_data(**kwargs)
         context['workspace'] = self.workspace
         
+        # Получаем настройки прав доступа
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        context['role_access'] = role_access
+        
         # Добавляем team_from_get в контекст для шаблона
         team_from_get = self.request.GET.get('team')
         if team_from_get:
@@ -338,12 +405,10 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
         return super().dispatch(request, *args, **kwargs)
 
     def get_queryset(self):
-        user_membership = WorkspaceMembership.objects.filter(
-            workspace=self.workspace, 
-            user=self.request.user
-        ).first()
+        # Права доступа через WorkspaceRoleAccess
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
         
-        if user_membership and user_membership.role in ['owner', 'admin']:
+        if role_access.has_permission(self.request.user, 'can_view_all_tasks'):
             return Task.objects.filter(workspace=self.workspace)
         else:
             user_teams = Team.objects.filter(
@@ -359,6 +424,15 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['workspace'] = self.workspace
+        
+        # Получаем настройки прав доступа
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        context['role_access'] = role_access
+        
+        # Проверяем права на редактирование и удаление задачи
+        context['can_edit_task'] = role_access.has_permission(self.request.user, 'can_edit_tasks')
+        context['can_delete_task'] = role_access.has_permission(self.request.user, 'can_delete_tasks')
+        
         return context
 
 
@@ -374,9 +448,9 @@ class CreateMassInvitationView(LoginRequiredMixin, View):
             url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем, что пользователь - владелец или администратор workspace
-        user_role = workspace.get_user_role(request.user)
-        if user_role not in ['owner', 'admin']:
+        # Проверяем право на управление доступом через WorkspaceRoleAccess
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
+        if not role_access.has_permission(request.user, 'can_manage_access'):
             return JsonResponse({'success': False, 'error': 'No permission'})
         
         form = MassInvitationForm(request.POST)
@@ -423,9 +497,9 @@ class CreateIndividualInvitationsView(LoginRequiredMixin, View):
             url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем, что пользователь - владелец или администратор workspace
-        user_role = workspace.get_user_role(request.user)
-        if user_role not in ['owner', 'admin']:
+        # Проверяем право на приглашение пользователей через WorkspaceRoleAccess
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
+        if not role_access.has_permission(request.user, 'can_invite_users'):
             return JsonResponse({'success': False, 'error': 'No permission'})
         
         identifiers = request.POST.get('identifiers', '').strip()
@@ -564,9 +638,9 @@ class ToggleAllInvitationsView(LoginRequiredMixin, View):
             url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем, что пользователь - владелец или администратор workspace
-        user_role = workspace.get_user_role(request.user)
-        if user_role not in ['owner', 'admin']:
+        # Проверяем право на управление доступом через WorkspaceRoleAccess
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
+        if not role_access.has_permission(request.user, 'can_manage_access'):
             return JsonResponse({'success': False, 'error': 'No permission'})
         
         action = request.POST.get('action')
@@ -718,13 +792,9 @@ class TeamInviteMemberView(LoginRequiredMixin, View):
             workspace__url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем, что пользователь - лидер или администратор команды
-        user_membership = TeamMembership.objects.filter(
-            team=team,
-            user=request.user
-        ).first()
-        
-        if not user_membership or user_membership.role not in ['leader', 'admin']:
+        # Проверяем право на приглашение пользователей через TeamRoleAccess
+        team_access, created = TeamRoleAccess.objects.get_or_create(team=team)
+        if not team_access.has_permission(request.user, 'can_invite_users'):
             return JsonResponse({'success': False, 'error': 'No permission'})
         
         user_ids = request.POST.getlist('user_ids[]')
@@ -826,13 +896,9 @@ class WorkspaceKickMemberView(LoginRequiredMixin, View):
             url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем, что пользователь - владелец или администратор рабочей области
-        user_membership = WorkspaceMembership.objects.filter(
-            workspace=workspace,
-            user=request.user
-        ).first()
-        
-        if not user_membership or user_membership.role not in ['owner', 'admin']:
+        # Проверяем право на управление доступом через WorkspaceRoleAccess
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
+        if not role_access.has_permission(request.user, 'can_manage_access'):
             return JsonResponse({'success': False, 'error': 'No permission'})
         
         user_ids = request.POST.getlist('user_ids[]')
@@ -861,7 +927,7 @@ class WorkspaceKickMemberView(LoginRequiredMixin, View):
                     continue
                 
                 # Проверяем права доступа для удаления
-                removal_error = self.check_removal_permission(user_membership, membership, user_to_remove)
+                removal_error = self.check_removal_permission(request.user, membership, user_to_remove)
                 if removal_error:
                     errors.append(removal_error)
                     continue
@@ -893,14 +959,19 @@ class WorkspaceKickMemberView(LoginRequiredMixin, View):
             'errors': errors
         })
     
-    def check_removal_permission(self, user_membership, target_membership, target_user):
+    def check_removal_permission(self, current_user, target_membership, target_user):
         """Проверяет права доступа для удаления пользователя"""
+        current_membership = WorkspaceMembership.objects.get(
+            workspace=target_membership.workspace,
+            user=current_user
+        )
+        
         # Владелец может удалить кого угодно (кроме себя)
-        if user_membership.role == 'owner':
+        if current_membership.role == 'owner':
             return None
         
         # Администратор может удалять только обычных участников
-        if user_membership.role == 'admin':
+        if current_membership.role == 'admin':
             if target_membership.role == 'owner':
                 return f"Нельзя удалить владельца рабочей области {target_user.username}"
             elif target_membership.role == 'admin':
@@ -961,13 +1032,9 @@ class TeamKickMemberView(LoginRequiredMixin, View):
             workspace__url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем, что пользователь - лидер или администратор команды
-        user_membership = TeamMembership.objects.filter(
-            team=team,
-            user=request.user
-        ).first()
-        
-        if not user_membership or user_membership.role not in ['leader', 'admin']:
+        # Проверяем право на управление доступом через TeamRoleAccess
+        team_access, created = TeamRoleAccess.objects.get_or_create(team=team)
+        if not team_access.has_permission(request.user, 'can_manage_access'):
             return JsonResponse({'success': False, 'error': 'No permission'})
         
         user_ids = request.POST.getlist('user_ids[]')
@@ -996,7 +1063,7 @@ class TeamKickMemberView(LoginRequiredMixin, View):
                     continue
                 
                 # Проверяем права доступа для удаления
-                removal_error = self.check_removal_permission(user_membership, membership, user_to_remove)
+                removal_error = self.check_removal_permission(request.user, membership, user_to_remove)
                 if removal_error:
                     errors.append(removal_error)
                     continue
@@ -1028,14 +1095,19 @@ class TeamKickMemberView(LoginRequiredMixin, View):
             'errors': errors
         })
     
-    def check_removal_permission(self, user_membership, target_membership, target_user):
+    def check_removal_permission(self, current_user, target_membership, target_user):
         """Проверяет права доступа для удаления пользователя"""
+        current_membership = TeamMembership.objects.get(
+            team=target_membership.team,
+            user=current_user
+        )
+        
         # Лидер может удалить кого угодно (кроме себя)
-        if user_membership.role == 'leader':
+        if current_membership.role == 'leader':
             return None
         
         # Администратор может удалять только обычных участников
-        if user_membership.role == 'admin':
+        if current_membership.role == 'admin':
             if target_membership.role == 'leader':
                 return f"Нельзя удалить лидера команды {target_user.username}"
             elif target_membership.role == 'admin':
@@ -1330,27 +1402,221 @@ class TeamChangeMemberRoleView(LoginRequiredMixin, View):
             message=message,
             level='info'
         )
+
+class SaveWorkspaceAccessSettingsView(LoginRequiredMixin, View):
+    """Сохранение настроек прав доступа для рабочей области"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        workspace = get_object_or_404(
+            Workspace, 
+            url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, что пользователь имеет право управлять доступом
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
+        if not role_access.has_permission(request.user, 'can_manage_access'):
+            return JsonResponse({'success': False, 'error': 'No permission to manage access'})
+        
+        try:
+            # Получаем и обновляем настройки для каждого типа прав
+            permissions = [
+                'can_manage_access',
+                'can_edit_workspace', 
+                'can_create_teams',
+                'can_create_tasks',
+                'can_edit_tasks',
+                'can_delete_tasks',
+                'can_invite_users'
+            ]
+            
+            updated_fields = []
+            
+            for permission in permissions:
+                permission_data = request.POST.get(permission)
+                if permission_data:
+                    try:
+                        # Парсим JSON данные
+                        roles = json.loads(permission_data)
+                        # Устанавливаем новые значения
+                        setattr(role_access, permission, roles)
+                        updated_fields.append(permission)
+                    except json.JSONDecodeError:
+                        return JsonResponse({
+                            'success': False, 
+                            'error': f'Invalid data format for {permission}'
+                        })
+            
+            # Сохраняем изменения
+            if updated_fields:
+                role_access.save(update_fields=updated_fields)
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Настройки доступа успешно сохранены',
+                'updated_fields': updated_fields
+            })
+            
+        except Exception as e:
+            return JsonResponse({
+                'success': False, 
+                'error': f'Ошибка при сохранении настроек: {str(e)}'
+            })
+
+class SaveTeamAccessSettingsView(LoginRequiredMixin, View):
+    """Сохранение настроек прав доступа для команды"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        team = get_object_or_404(
+            Team, 
+            url_hash=kwargs['team_url_hash'],
+            workspace__url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, что пользователь имеет право управлять доступом в команде
+        team_access, created = TeamRoleAccess.objects.get_or_create(team=team)
+        if not team_access.has_permission(request.user, 'can_manage_access'):
+            return JsonResponse({'success': False, 'error': 'No permission to manage access'})
+        
+        try:
+            # Получаем и обновляем настройки для каждого типа прав
+            permissions = [
+                'can_manage_access',
+                'can_delete_team', 
+                'can_edit_team',
+                'can_invite_users'
+            ]
+            
+            updated_fields = []
+            
+            for permission in permissions:
+                permission_data = request.POST.get(permission)
+                if permission_data:
+                    try:
+                        # Парсим JSON данные
+                        roles = json.loads(permission_data)
+                        # Устанавливаем новые значения
+                        setattr(team_access, permission, roles)
+                        updated_fields.append(permission)
+                    except json.JSONDecodeError:
+                        return JsonResponse({
+                            'success': False, 
+                            'error': f'Invalid data format for {permission}'
+                        })
+            
+            # Обновляем настройку видимости
+            visibility = request.POST.get('visibility')
+            if visibility in ['private', 'workspace']:
+                team_access.visibility = visibility
+                updated_fields.append('visibility')
+            
+            # Сохраняем изменения
+            if updated_fields:
+                team_access.save(update_fields=updated_fields)
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Настройки доступа команды успешно сохранены',
+                'updated_fields': updated_fields
+            })
+            
+        except Exception as e:
+            return JsonResponse({
+                'success': False, 
+                'error': f'Ошибка при сохранении настроек: {str(e)}'
+            })
+
+class GetWorkspaceAccessView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        workspace = get_object_or_404(
+            Workspace, 
+            url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, что пользователь имеет доступ к рабочей области
+        if not workspace.has_access(request.user):
+            return JsonResponse({'success': False, 'error': 'No access to workspace'})
+        
+        # Получаем настройки прав доступа
+        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
+        
+        # Формируем данные для ответа
+        access_data = {
+            'can_manage_access': role_access.can_manage_access,
+            'can_edit_workspace': role_access.can_edit_workspace,
+            'can_create_teams': role_access.can_create_teams,
+            'can_create_tasks': role_access.can_create_tasks,
+            'can_edit_tasks': role_access.can_edit_tasks,
+            'can_delete_tasks': role_access.can_delete_tasks,
+            'can_invite_users': role_access.can_invite_users,
+        }
+        
+        return JsonResponse({
+            'success': True,
+            'access_data': access_data
+        })
+
+class GetTeamAccessView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        team = get_object_or_404(
+            Team, 
+            url_hash=kwargs['team_url_hash'],
+            workspace__url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, что пользователь имеет доступ к команде
+        team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+        if not team_access.is_team_visible_to_user(request.user):
+            return JsonResponse({'success': False, 'error': 'No access to team'})
+        
+        # Формируем данные для ответа
+        access_data = {
+            'can_manage_access': team_access.can_manage_access,
+            'can_delete_team': team_access.can_delete_team,
+            'can_edit_team': team_access.can_edit_team,
+            'can_invite_users': team_access.can_invite_users,
+            'visibility': team_access.visibility,
+        }
+        
+        return JsonResponse({
+            'success': True,
+            'access_data': access_data
+        })
 '''
 todo:
-    ✅ WorkspaceChangeMemberRoleView
-    ✅ TeamChangeMemberRoleView
-    
     ⚡️ role system:
-        * set who can create team
-        * set who can create task
+        workspace:
+            * set who can set access settings
+            * set who can edit workspace
+            * set who can create team
+            * set who can create task
+            * set who can edit task
+            * set who can delete task
+            * set who can invite members
+        team:
+            * set who can set access settings
+            * set who can edit team
+            * set who can delete team
+            * set team visible to uninvited user
+            * set who can invite members
 
-        * set who can edit workspace
-        * set who can edit task
-
-        * set team visible to uninvited members
-
-        * GetOutWorkspaceView
-        * GetOutTeamView
-    
+        ⚡️⚡️* GetOutWorkspaceView
+        ⚡️⚡️* GetOutTeamView
+        ⚡️⚡️⚡️* WorkspaceEditView
+        ⚡️⚡️⚡️* TeamEditView
     
     ✏️ medium important:
-        * WorkspaceEditView
-        * TeamEditView
         * ProfileAvatar
         * WorkspaceAvatar
         * TeamAvatar
@@ -1361,10 +1627,30 @@ todo:
         * pinned tasks
 
 edit:
+  ⚡️SORT SYSTEM:
     get_queryset in TaskListView – add filters:
         * asigned (to me/to user if admin rules)
         * status
         * deadline
         * category
-        * pinned
+        * pinned (to user)
+  ⚡️FORM: ignore ENTER submit
+
+⚡️ tasks:
+    id
+    hash
+    workspace
+    title
+    about
+    tags
+    author
+    asigned
+    visible
+    editable
+    status
+    category
+    deadline
+    created_at
+    updated_at
+    chat
 '''

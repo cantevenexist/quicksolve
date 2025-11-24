@@ -39,7 +39,7 @@
 <a href="{% url 'workspace:task_list' workspace.url_hash %}">Все задачи</a>
 
 <!-- Блок управления -->
-<div id="managementBlock" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1000; width: 80%; max-width: 800px;">
+<div id="managementBlock" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1000; width: 80%; max-width: 800px; max-height: 90%; overflow-y: scroll;">
     <div style="position: absolute; top: 10px; right: 10px; cursor: pointer;" onclick="closeManagement()">✕</div>
     
     <div style="display: flex;">
@@ -48,6 +48,7 @@
             <div id="navMain" style="cursor: pointer; padding: 10px; background: #f0f0f0;" onclick="showContent('main')">Главное</div>
             <div id="navMembers" style="cursor: pointer; padding: 10px;" onclick="showContent('members')">Участники</div>
             <div id="navAdmin" style="cursor: pointer; padding: 10px;" onclick="showContent('admin')">Администрирование</div>
+            <div id="navAccess" style="cursor: pointer; padding: 10px;" onclick="showContent('access')">Управление доступом</div>
         </div>
         
         <!-- Контент -->
@@ -69,161 +70,161 @@
             </div>
             
             <!-- Участники -->
-<div id="contentMembers" style="display: none;">
-    <h3>Участники рабочей области</h3>
-    
-    <!-- Текущие участники -->
-    <div style="margin-bottom: 30px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h4 style="margin: 0;">Текущие участники</h4>
-            <div>
-                <button id="kickMembersBtn" type="button" onclick="toggleKickMode()" style="padding: 6px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
-                    Удалить
-                </button>
-                <button id="cancelKickBtn" type="button" onclick="cancelKickMode()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;">
-                    Отменить
-                </button>
-            </div>
-        </div>
-        
-        <div id="membersList">
-            {% for member in members %}
-                <div class="member-item" style="padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
-                    <input type="checkbox" name="kick_user_ids" value="{{ member.user.id }}" 
-                           style="margin-right: 10px; display: none;" 
-                           class="kick-checkbox"
-                           {% if member.user == request.user or member.role == 'owner' %}disabled{% endif %}>
-                    <div style="flex: 1;">
-                        {{ member.user }} ({{ member.get_role_display }})
-                        {% if member.user == request.user %}<span style="color: #666;">(Вы)</span>{% endif %}
+            <div id="contentMembers" style="display: none;">
+                <h3>Участники рабочей области</h3>
+                
+                <!-- Текущие участники -->
+                <div style="margin-bottom: 30px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h4 style="margin: 0;">Текущие участники</h4>
+                        <div>
+                            <button id="kickMembersBtn" type="button" onclick="toggleKickMode()" style="padding: 6px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
+                                Удалить
+                            </button>
+                            <button id="cancelKickBtn" type="button" onclick="cancelKickMode()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;">
+                                Отменить
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="membersList">
+                        {% for member in members %}
+                            <div class="member-item" style="padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
+                                <input type="checkbox" name="kick_user_ids" value="{{ member.user.id }}" 
+                                       style="margin-right: 10px; display: none;" 
+                                       class="kick-checkbox"
+                                       {% if member.user == request.user or member.role == 'owner' %}disabled{% endif %}>
+                                <div style="flex: 1;">
+                                    {{ member.user }} ({{ member.get_role_display }})
+                                    {% if member.user == request.user %}<span style="color: #666;">(Вы)</span>{% endif %}
+                                </div>
+                            </div>
+                        {% empty %}
+                            <li>Нет других участников</li>
+                        {% endfor %}
+                    </div>
+                    
+                    <div id="kickActions" style="margin-top: 15px; display: none;">
+                        <button type="button" onclick="confirmKickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            Удалить выбранных
+                        </button>
+                        <span id="selectedCount" style="margin-left: 10px; color: #666;"></span>
                     </div>
                 </div>
-            {% empty %}
-                <li>Нет других участников</li>
-            {% endfor %}
-        </div>
-        
-        <div id="kickActions" style="margin-top: 15px; display: none;">
-            <button type="button" onclick="confirmKickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                Удалить выбранных
-            </button>
-            <span id="selectedCount" style="margin-left: 10px; color: #666;"></span>
-        </div>
-    </div>
 
-    <!-- Массовое приглашение -->
-    <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
-        <h4>Массовое приглашение</h4>
-        
-        {% if mass_invitation_url %}
-        <div id="existingMassInvitation" style="margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #e9ecef;">
-            <p style="margin: 0 0 10px 0; font-weight: bold;">
-                {% if mass_invitation_data.can_be_used %}Текущая активная ссылка:{% else %}Текущая ссылка (неактивна):{% endif %}
-            </p>
-            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                <input type="text" id="existingInvitationLink" value="{{ mass_invitation_url }}" readonly 
-                       style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #fff;">
-                <button type="button" onclick="copyExistingInvitationLink()" 
-                        style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
-                    Копировать
-                </button>
-            </div>
-            <div style="font-size: 12px; color: #666;">
-                <div>Срок действия: {{ mass_invitation_data.expiration_time }}</div>
-                <div>Использований: {{ mass_invitation_data.max_uses }} (текущее: {{ mass_invitation_data.current_uses }})</div>
-                <div>Статус: 
-                    <span class="status-indicator" data-status="{% if mass_invitation_data.can_be_used %}active{% else %}inactive{% endif %}">
-                        {% if mass_invitation_data.can_be_used %}Активно{% else %}Неактивно{% endif %}
-                    </span>
-                    <style>
-                    .status-indicator[data-status="active"] { color: #28a745; }
-                    .status-indicator[data-status="inactive"] { color: #dc3545; }
-                    </style>
+                <!-- Массовое приглашение -->
+                <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+                    <h4>Массовое приглашение</h4>
+                    
+                    {% if mass_invitation_url %}
+                    <div id="existingMassInvitation" style="margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #e9ecef;">
+                        <p style="margin: 0 0 10px 0; font-weight: bold;">
+                            {% if mass_invitation_data.can_be_used %}Текущая активная ссылка:{% else %}Текущая ссылка (неактивна):{% endif %}
+                        </p>
+                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                            <input type="text" id="existingInvitationLink" value="{{ mass_invitation_url }}" readonly 
+                                   style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #fff;">
+                            <button type="button" onclick="copyExistingInvitationLink()" 
+                                    style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+                                Копировать
+                            </button>
+                        </div>
+                        <div style="font-size: 12px; color: #666;">
+                            <div>Срок действия: {{ mass_invitation_data.expiration_time }}</div>
+                            <div>Использований: {{ mass_invitation_data.max_uses }} (текущее: {{ mass_invitation_data.current_uses }})</div>
+                            <div>Статус: 
+                                <span class="status-indicator" data-status="{% if mass_invitation_data.can_be_used %}active{% else %}inactive{% endif %}">
+                                    {% if mass_invitation_data.can_be_used %}Активно{% else %}Неактивно{% endif %}
+                                </span>
+                                <style>
+                                .status-indicator[data-status="active"] { color: #28a745; }
+                                .status-indicator[data-status="inactive"] { color: #dc3545; }
+                                </style>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <form id="massInvitationForm">
+                        {% csrf_token %}
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Срок действия:</label>
+                            <select name="expiration_time" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                                <option value="">Бессрочно</option>
+                                <option value="3600">1 час</option>
+                                <option value="14400">4 часа</option>
+                                <option value="86400">24 часа</option>
+                                <option value="172800">48 часов</option>
+                                <option value="259200">72 часа</option>
+                            </select>
+                        </div>
+                        
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Количество использований:</label>
+                            <input type="number" name="max_uses" min="1" placeholder="Оставьте пустым для безграничного использования"
+                                   style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                        </div>
+                        
+                        <button type="button" onclick="createMassInvitation()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+                            {% if mass_invitation_url %}Обновить ссылку{% else %}Создать ссылку{% endif %}
+                        </button>
+                    </form>
+                    
+                    <div id="massInvitationResult" style="margin-top: 15px; display: none;"></div>
+                </div>
+
+                <!-- Точечное приглашение -->
+                <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+                    <h4>Точечное приглашение</h4>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+                        Введите почты или уникальные коды через пробел или Enter
+                    </p>
+                    
+                    <form id="individualInvitationForm">
+                        {% csrf_token %}
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Почты или коды:</label>
+                            <input type="text" id="identifiersInput" 
+                                   placeholder="user1@example.com ABC123 user2@example.com"
+                                   style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            
+                            <div id="identifiersList" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px;"></div>
+                        </div>
+                        
+                        <button type="button" onclick="createIndividualInvitations()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+                            Отправить приглашения
+                        </button>
+                    </form>
+                    
+                    <div id="individualInvitationResult" style="margin-top: 15px; display: none;"></div>
+                </div>
+
+                <!-- Управление приглашениями -->
+                <div style="padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;">
+                    <h4>Управление приглашениями</h4>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <span>Статус массового приглашения:</span>
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="toggleAllInvitations" {% if mass_invitation_data.is_active %}checked{% endif %} onchange="toggleAllInvitations()" style="margin-right: 8px;">
+                            <span>{% if mass_invitation_data.is_active %}Активно{% else %}Неактивно{% endif %}</span>
+                        </label>
+                    </div>
                 </div>
             </div>
-        </div>
-        {% endif %}
-        
-        <form id="massInvitationForm">
-            {% csrf_token %}
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Срок действия:</label>
-                <select name="expiration_time" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-                    <option value="">Бессрочно</option>
-                    <option value="3600">1 час</option>
-                    <option value="14400">4 часа</option>
-                    <option value="86400">24 часа</option>
-                    <option value="172800">48 часов</option>
-                    <option value="259200">72 часа</option>
-                </select>
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Количество использований:</label>
-                <input type="number" name="max_uses" min="1" placeholder="Оставьте пустым для безграничного использования"
-                       style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-            </div>
-            
-            <button type="button" onclick="createMassInvitation()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
-                {% if mass_invitation_url %}Обновить ссылку{% else %}Создать ссылку{% endif %}
-            </button>
-        </form>
-        
-        <div id="massInvitationResult" style="margin-top: 15px; display: none;"></div>
-    </div>
 
-    <!-- Точечное приглашение -->
-    <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
-        <h4>Точечное приглашение</h4>
-        <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
-            Введите почты или уникальные коды через пробел или Enter
-        </p>
-        
-        <form id="individualInvitationForm">
-            {% csrf_token %}
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Почты или коды:</label>
-                <input type="text" id="identifiersInput" 
-                       placeholder="user1@example.com ABC123 user2@example.com"
-                       style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-                
-                <div id="identifiersList" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 5px;"></div>
+            <!-- Модальное окно подтверждения удаления -->
+            <div id="confirmKickModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <h3 style="margin-top: 0;">Подтверждение удаления</h3>
+                <p id="confirmKickMessage">Вы уверены, что хотите удалить выбранных пользователей из рабочей области?</p>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                    <button type="button" onclick="closeConfirmKickModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        Отмена
+                    </button>
+                    <button type="button" onclick="kickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        Удалить
+                    </button>
+                </div>
             </div>
-            
-            <button type="button" onclick="createIndividualInvitations()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
-                Отправить приглашения
-            </button>
-        </form>
-        
-        <div id="individualInvitationResult" style="margin-top: 15px; display: none;"></div>
-    </div>
-
-    <!-- Управление приглашениями -->
-    <div style="padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;">
-        <h4>Управление приглашениями</h4>
-        <div style="display: flex; align-items: center; gap: 15px;">
-            <span>Статус массового приглашения:</span>
-            <label style="display: flex; align-items: center; cursor: pointer;">
-                <input type="checkbox" id="toggleAllInvitations" {% if mass_invitation_data.is_active %}checked{% endif %} onchange="toggleAllInvitations()" style="margin-right: 8px;">
-                <span>{% if mass_invitation_data.is_active %}Активно{% else %}Неактивно{% endif %}</span>
-            </label>
-        </div>
-    </div>
-</div>
-
-<!-- Модальное окно подтверждения удаления -->
-<div id="confirmKickModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-    <h3 style="margin-top: 0;">Подтверждение удаления</h3>
-    <p id="confirmKickMessage">Вы уверены, что хотите удалить выбранных пользователей из рабочей области?</p>
-    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-        <button type="button" onclick="closeConfirmKickModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            Отмена
-        </button>
-        <button type="button" onclick="kickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            Удалить
-        </button>
-    </div>
-</div>
 
             <!-- Администрирование -->
             <div id="contentAdmin" style="display: none;">
@@ -328,6 +329,195 @@
                     </ul>
                 </div>
             </div>
+
+            <!-- Управление доступом -->
+            <div id="contentAccess" style="display: none;">
+                <h3>Управление доступом</h3>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Настройте права доступа для различных ролей в рабочей области
+                </p>
+
+                <!-- Настройки прав рабочей области -->
+                <div style="margin-bottom: 30px;">
+                    <h4>Права рабочей области</h4>
+                    
+                    <form id="workspaceAccessForm">
+                        {% csrf_token %}
+                        
+                        <!-- Управление доступом -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Управление доступом</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может управлять доступом к рабочей области (приглашать, удалять пользователей)
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_manage_access" value="owner" checked disabled>
+                                    Владелец
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_manage_access" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_manage_access" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Редактирование рабочей области -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Редактирование рабочей области</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может изменять настройки рабочей области
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_edit_workspace" value="owner" checked disabled>
+                                    Владелец
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_edit_workspace" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_edit_workspace" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Создание команд -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Создание команд</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может создавать новые команды в рабочей области
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_create_teams" value="owner" checked disabled>
+                                    Владелец
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_create_teams" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_create_teams" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Создание задач -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Создание задач</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может создавать задачи в рабочей области
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_create_tasks" value="owner" checked disabled>
+                                    Владелец
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_create_tasks" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_create_tasks" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Редактирование задач -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Редактирование задач</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может редактировать существующие задачи
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_edit_tasks" value="owner" checked disabled>
+                                    Владелец
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_edit_tasks" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_edit_tasks" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Удаление задач -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Удаление задач</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может удалять задачи
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_delete_tasks" value="owner" checked disabled>
+                                    Владелец
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_delete_tasks" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_delete_tasks" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Приглашение пользователей -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Приглашение пользователей</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может приглашать новых пользователей в рабочую область
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_invite_users" value="owner" checked disabled>
+                                    Владелец
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_invite_users" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_invite_users" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
+                        <button type="button" onclick="saveWorkspaceAccessSettings()" 
+                                style="background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px;">
+                            Сохранить настройки доступа
+                        </button>
+                    </form>
+
+                    <div id="workspaceAccessResult" style="margin-top: 15px; display: none;"></div>
+                </div>
+
+                <!-- Информация о правах -->
+                <div style="padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #e9ecef;">
+                    <h5 style="margin-top: 0;">Информация о правах</h5>
+                    <ul style="color: #666; font-size: 14px; margin: 0; padding-left: 20px;">
+                        <li><strong>Владелец</strong> всегда имеет все права доступа</li>
+                        <li><strong>Администраторы</strong> имеют расширенные права управления</li>
+                        <li><strong>Участники</strong> имеют базовые права в соответствии с настройками</li>
+                        <li>Изменения вступают в силу немедленно</li>
+                    </ul>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -384,6 +574,118 @@ function showContent(section) {
     document.getElementById(`nav${section.charAt(0).toUpperCase() + section.slice(1)}`).style.background = '#f0f0f0';
     
     if (section === 'members') initMembersSection();
+    if (section === 'access') {
+        // Загружаем настройки при открытии вкладки доступа
+        loadAccessSettings();
+    }
+}
+
+// Функция для загрузки настроек доступа через AJAX
+function loadAccessSettings() {
+    const formData = new FormData();
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    fetch(`{% url 'workspace:get_workspace_access_settings' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            updateCheckboxState(data.access_data);
+        } else {
+            console.error('Error loading access settings:', data.error);
+            document.getElementById('workspaceAccessResult').innerHTML = 
+                '<div style="color: #721c24; background: #f8d7da; padding: 10px; border-radius: 4px; border: 1px solid #f5c6cb;">❌ Ошибка загрузки настроек доступа</div>';
+            document.getElementById('workspaceAccessResult').style.display = 'block';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('workspaceAccessResult').innerHTML = 
+            '<div style="color: #721c24; background: #f8d7da; padding: 10px; border-radius: 4px; border: 1px solid #f5c6cb;">❌ Ошибка при загрузке настроек</div>';
+        document.getElementById('workspaceAccessResult').style.display = 'block';
+    });
+}
+
+// Функция для обновления состояния чекбоксов на основе данных
+function updateCheckboxState(settings) {
+    const permissions = [
+        'can_manage_access',
+        'can_edit_workspace', 
+        'can_create_teams',
+        'can_create_tasks',
+        'can_edit_tasks',
+        'can_delete_tasks',
+        'can_invite_users'
+    ];
+    
+    permissions.forEach(permission => {
+        const roles = settings[permission] || [];
+        const checkboxes = document.querySelectorAll(`input[name="${permission}"]`);
+        
+        checkboxes.forEach(checkbox => {
+            if (checkbox.value === 'owner') {
+                // Владелец всегда отмечен и заблокирован
+                checkbox.checked = true;
+                checkbox.disabled = true;
+            } else {
+                // Для других ролей устанавливаем состояние из загруженных данных
+                checkbox.checked = roles.includes(checkbox.value);
+                checkbox.disabled = false;
+            }
+        });
+    });
+}
+
+// Сохранение настроек доступа рабочей области
+function saveWorkspaceAccessSettings() {
+    const form = document.getElementById('workspaceAccessForm');
+    const formData = new FormData();
+    
+    // Собираем данные из чекбоксов
+    const permissions = [
+        'can_manage_access',
+        'can_edit_workspace', 
+        'can_create_teams',
+        'can_create_tasks',
+        'can_edit_tasks',
+        'can_delete_tasks',
+        'can_invite_users'
+    ];
+    
+    permissions.forEach(permission => {
+        const checkboxes = form.querySelectorAll(`input[name="${permission}"]:checked`);
+        const values = Array.from(checkboxes).map(cb => cb.value);
+        formData.append(permission, JSON.stringify(values));
+    });
+    
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    fetch(`{% url 'workspace:save_workspace_access_settings' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(response => response.json())
+    .then(data => {
+        const resultDiv = document.getElementById('workspaceAccessResult');
+        
+        if (data.success) {
+            resultDiv.innerHTML = '<div style="color: #155724; background: #d4edda; padding: 10px; border-radius: 4px; border: 1px solid #c3e6cb;">✅ Настройки доступа успешно сохранены</div>';
+        } else {
+            resultDiv.innerHTML = `<div style="color: #721c24; background: #f8d7da; padding: 10px; border-radius: 4px; border: 1px solid #f5c6cb;">❌ Ошибка: ${data.error || 'Неизвестная ошибка'}</div>`;
+        }
+        
+        resultDiv.style.display = 'block';
+        setTimeout(() => resultDiv.style.display = 'none', 3000);
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('workspaceAccessResult').innerHTML = '<div style="color: #721c24; background: #f8d7da; padding: 10px; border-radius: 4px; border: 1px solid #f5c6cb;">❌ Ошибка при сохранении настроек</div>';
+        document.getElementById('workspaceAccessResult').style.display = 'block';
+    });
 }
 
 // Массовое приглашение

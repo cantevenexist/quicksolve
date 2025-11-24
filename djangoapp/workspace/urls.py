@@ -25,11 +25,17 @@ urlpatterns = [
     path('invitations/accept/<str:token>/', views.AcceptInvitationView.as_view(), name='accept_invitation'),
     path('<str:workspace_url_hash>/team/<str:team_url_hash>/invite-members/', views.TeamInviteMemberView.as_view(), name='team_invite_members'),
     
-    # === KICK ===
+    # === KICK MEMBER ===
     path('<str:workspace_url_hash>/kick-members/', views.WorkspaceKickMemberView.as_view(), name='workspace_kick_members'),
     path('<str:workspace_url_hash>/team/<str:team_url_hash>/kick-members/', views.TeamKickMemberView.as_view(), name='team_kick_members'),
 
-    # === ROLE ===
+    # === CHANGE MEMBER ROLE ===
     path('<str:workspace_url_hash>/change-member-role/', views.WorkspaceChangeMemberRoleView.as_view(), name='workspace_change_member_role'),
     path('<str:workspace_url_hash>/team/<str:team_url_hash>/change-member-role/', views.TeamChangeMemberRoleView.as_view(), name='team_change_member_role'),
+    
+    # === ACCESS SETTINGS ===
+    path('<str:workspace_url_hash>/access-settings/save/', views.SaveWorkspaceAccessSettingsView.as_view(), name='save_workspace_access_settings'),
+    path('<str:workspace_url_hash>/access-settings/get/', views.GetWorkspaceAccessView.as_view(), name='get_workspace_access_settings'),
+    path('<str:workspace_url_hash>/team/<str:team_url_hash>/access-settings/save/', views.SaveTeamAccessSettingsView.as_view(), name='save_team_access_settings'),
+    path('<str:workspace_url_hash>/<str:team_url_hash>/access-settings/get/', views.GetTeamAccessView.as_view(), name='get_team_access_settings'),
 ]

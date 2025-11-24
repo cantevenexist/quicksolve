@@ -158,6 +158,100 @@ class WorkspaceMembership(models.Model):
         return f'{self.user.username} - {self.workspace.name} ({self.get_role_display()})'
 
 
+class WorkspaceRoleAccess(models.Model):
+    """
+    Модель для управления правами доступа в рабочей области
+    """
+    workspace = models.OneToOneField(Workspace, on_delete=models.CASCADE, related_name='role_access')
+    
+    # Права управления доступом
+    can_manage_access = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут управлять доступом к workspace"
+    )
+    
+    # Права изменения workspace
+    can_edit_workspace = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут изменять workspace"
+    )
+    
+    # Права создания команд
+    can_create_teams = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут создавать команды"
+    )
+    
+    # Права создания задач
+    can_create_tasks = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут создавать задачи"
+    )
+    
+    # Права редактирования задач
+    can_edit_tasks = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут редактировать задачи"
+    )
+    
+    # Права удаления задач
+    can_delete_tasks = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут удалять задачи"
+    )
+    
+    # Права приглашения пользователей
+    can_invite_users = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут приглашать новых пользователей"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Настройка прав рабочей области'
+        verbose_name_plural = 'Настройки прав рабочих областей'
+
+    def save(self, *args, **kwargs):
+        # Устанавливаем значения по умолчанию при первом создании
+        if not self.pk:
+            self.set_default_permissions()
+        super().save(*args, **kwargs)
+
+    def set_default_permissions(self):
+        """Устанавливает права доступа по умолчанию"""
+        self.can_manage_access = ['owner', 'admin']
+        self.can_edit_workspace = ['owner', 'admin', 'member']
+        self.can_create_teams = ['owner', 'admin', 'member']
+        self.can_create_tasks = ['owner', 'admin', 'member']
+        self.can_edit_tasks = ['owner', 'admin', 'member']
+        self.can_delete_tasks = ['owner', 'admin', 'member']
+        self.can_invite_users = ['owner', 'admin', 'member']
+
+    def has_permission(self, user, permission_type):
+        """Проверяет, имеет ли пользователь указанное право"""
+        # Получаем роль пользователя в workspace
+        user_role = self.workspace.get_user_role(user)
+        if not user_role:
+            return False
+        
+        # Владелец workspace имеет все права
+        if user_role == 'owner':
+            return True
+        
+        # Администраторы workspace имеют все права администратора
+        if user_role == 'admin':
+            return True
+        
+        # Проверяем права для конкретного действия
+        permission_field = getattr(self, permission_type, [])
+        return user_role in permission_field
+
+    def __str__(self):
+        return f'Права доступа для {self.workspace.name}'
+
+
 class Team(models.Model):
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
     name = models.CharField(max_length=255, default='Новая команда')
@@ -217,6 +311,115 @@ class TeamMembership(models.Model):
 
     def __str__(self):
         return f'{self.user.username} - {self.team.name} ({self.get_role_display()})'
+
+
+class TeamRoleAccess(models.Model):
+    """
+    Модель для управления правами доступа в команде
+    """
+    VISIBILITY_CHOICES = [
+        ('private', 'Только для участников команды'),
+        ('workspace', 'Для всех участников workspace'),
+    ]
+    
+    team = models.OneToOneField(Team, on_delete=models.CASCADE, related_name='role_access')
+    
+    # Права управления доступом
+    can_manage_access = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут управлять доступом к команде"
+    )
+    
+    # Права удаления команды
+    can_delete_team = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут удалять команду"
+    )
+    
+    # Права редактирования команды
+    can_edit_team = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут редактировать команду"
+    )
+    
+    # Права приглашения пользователей
+    can_invite_users = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут приглашать пользователей в команду"
+    )
+    
+    # Видимость команды
+    visibility = models.CharField(
+        max_length=20,
+        choices=VISIBILITY_CHOICES,
+        default='private',
+        help_text="Видимость команды для пользователей, которые не состоят в команде"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Настройка прав команды'
+        verbose_name_plural = 'Настройки прав команд'
+
+    def save(self, *args, **kwargs):
+        # Устанавливаем значения по умолчанию при первом создании
+        if not self.pk:
+            self.set_default_permissions()
+        super().save(*args, **kwargs)
+
+    def set_default_permissions(self):
+        """Устанавливает права доступа по умолчанию"""
+        self.can_manage_access = ['leader', 'admin', 'member']
+        self.can_delete_team = ['leader', 'admin', 'member']
+        self.can_edit_team = ['leader', 'admin', 'member']
+        self.can_invite_users = ['leader', 'admin', 'member']
+        self.visibility = 'private'
+
+    def has_permission(self, user, permission_type):
+        """Проверяет, имеет ли пользователь указанное право в команде"""
+        # Проверяем, является ли пользователь владельцем или администратором workspace
+        workspace_role = self.team.workspace.get_user_role(user)
+        if workspace_role in ['owner', 'admin']:
+            return True
+        
+        # Получаем роль пользователя в команде
+        try:
+            team_membership = TeamMembership.objects.get(team=self.team, user=user)
+            user_role = team_membership.role
+        except TeamMembership.DoesNotExist:
+            return False
+        
+        # Лидер команды имеет все права администратора
+        if user_role == 'leader':
+            return True
+        
+        # Проверяем права для конкретного действия
+        permission_field = getattr(self, permission_type, [])
+        return user_role in permission_field
+
+    def is_team_visible_to_user(self, user):
+        """Проверяет, видна ли команда пользователю"""
+        # Владельцы и администраторы workspace всегда видят все команды
+        workspace_role = self.team.workspace.get_user_role(user)
+        if workspace_role in ['owner', 'admin']:
+            return True
+        
+        # Участники команды всегда видят свою команду
+        if TeamMembership.objects.filter(team=self.team, user=user).exists():
+            return True
+        
+        # Проверяем настройки видимости
+        if self.visibility == 'workspace':
+            # Команда видна всем участникам workspace
+            return self.team.workspace.has_access(user)
+        
+        # По умолчанию команда приватная
+        return False
+
+    def __str__(self):
+        return f'Права доступа для команды {self.team.name}'
 
 
 class Task(models.Model):
