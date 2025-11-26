@@ -1,15 +1,18 @@
 {% extends 'layout.html' %}
 {% block content %}
 
-<div style="display: flex; flex-direction: row;">
+<div style="display: flex; flex-direction: row; gap: 10px">
     <h1>{{ workspace.name }}</h1>
 
-    <!-- Кнопка управления -->
-    <button onclick="openManagement()" style="cursor: pointer; height: 40px;">Управление</button>
+    <!-- Кнопка управления - показываем только если есть права на редактирование -->
+    {% if can_edit_workspace or can_manage_access %}
+    <button onclick="openManagement()" style="cursor: pointer; height: 40px; margin-top: 20px;">Управление</button>
+    {% endif %}
 </div>
 
 <!-- Количество участников -->
-<div style="cursor: pointer; color: #666; margin-bottom: 20px;" onclick="openManagementWithMembers()">
+<div style="cursor: pointer; color: #666; margin-bottom: 20px;" 
+    onclick="openManagementWithMembers()">
     {% with total_members=workspace.members.count %}
         {{ total_members }} участник{{ total_members|pluralize:"ов" }}
     {% endwith %}
@@ -17,7 +20,9 @@
 
 <!-- Команды -->
 <h2>Команды:</h2>
+{% if can_create_teams %}
 <a href="{% url 'workspace:team_create' workspace.url_hash %}">Создать команду</a>
+{% endif %}
 
 {% if teams %}
     <ul>
@@ -35,7 +40,9 @@
 
 <!-- Задачи -->
 <h2>Задачи:</h2>
+{% if can_create_tasks %}
 <a href="{% url 'workspace:task_create' workspace.url_hash %}">Создать задачу</a>
+{% endif %}
 <a href="{% url 'workspace:task_list' workspace.url_hash %}">Все задачи</a>
 
 <!-- Блок управления -->
@@ -47,26 +54,43 @@
         <div style="width: 30%; border-right: 1px solid #ccc; padding-right: 20px;">
             <div id="navMain" style="cursor: pointer; padding: 10px; background: #f0f0f0;" onclick="showContent('main')">Главное</div>
             <div id="navMembers" style="cursor: pointer; padding: 10px;" onclick="showContent('members')">Участники</div>
+            
+            <!-- Администрирование - только для владельца -->
+            {% if workspace_user_membership.role == 'owner' %}
             <div id="navAdmin" style="cursor: pointer; padding: 10px;" onclick="showContent('admin')">Администрирование</div>
+            {% endif %}
+            
+            <!-- Управление доступом - только для тех, у кого есть права -->
+            {% if can_manage_access %}
             <div id="navAccess" style="cursor: pointer; padding: 10px;" onclick="showContent('access')">Управление доступом</div>
+            {% endif %}
         </div>
         
         <!-- Контент -->
         <div style="width: 70%; padding-left: 20px;">
-            <!-- Главное -->
+            <!-- Главное - доступно всем, но редактирование только с правами -->
             <div id="contentMain" style="display: block;">
                 <h3>Основные настройки</h3>
-                <form>
+                
+                {% if can_edit_workspace %}
+                <form id="workspaceMainForm">
                     <div>
                         <label>Название:</label>
-                        <input type="text" value="{{ workspace.name }}" style="width: 100%; margin-bottom: 10px;">
+                        <input type="text" id="workspaceName" value="{{ workspace.name }}" style="width: 100%; margin-bottom: 10px;">
                     </div>
                     <div>
                         <label>Описание:</label>
-                        <textarea style="width: 100%; height: 100px; margin-bottom: 10px;">{{ workspace.description|default:'' }}</textarea>
+                        <textarea id="workspaceDescription" style="width: 100%; height: 100px; margin-bottom: 10px;">{{ workspace.description|default:'' }}</textarea>
                     </div>
-                    <button type="button">Сохранить</button>
+                    <button type="button" onclick="saveWorkspaceMainSettings()">Сохранить</button>
                 </form>
+                {% else %}
+                <div>
+                    <p><strong>Название:</strong> {{ workspace.name }}</p>
+                    <p><strong>Описание:</strong> {{ workspace.description|default:"Не указано" }}</p>
+                    <p style="color: #666; font-style: italic;">Для изменения настроек обратитесь к администратору рабочей области</p>
+                </div>
+                {% endif %}
             </div>
             
             <!-- Участники -->
@@ -77,6 +101,9 @@
                 <div style="margin-bottom: 30px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                         <h4 style="margin: 0;">Текущие участники</h4>
+                        
+                        <!-- Кнопка удаления - только для тех, у кого есть права -->
+                        {% if can_manage_access %}
                         <div>
                             <button id="kickMembersBtn" type="button" onclick="toggleKickMode()" style="padding: 6px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
                                 Удалить
@@ -85,18 +112,22 @@
                                 Отменить
                             </button>
                         </div>
+                        {% endif %}
                     </div>
                     
                     <div id="membersList">
                         {% for member in members %}
                             <div class="member-item" style="padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
+                                <!-- Чекбоксы для удаления - только при наличии прав -->
+                                {% if can_manage_access %}
                                 <input type="checkbox" name="kick_user_ids" value="{{ member.user.id }}" 
                                        style="margin-right: 10px; display: none;" 
                                        class="kick-checkbox"
-                                       {% if member.user == request.user or member.role == 'owner' %}disabled{% endif %}>
+                                       {% if member.user == user or member.role == 'owner' %}disabled{% endif %}>
+                                {% endif %}
                                 <div style="flex: 1;">
                                     {{ member.user }} ({{ member.get_role_display }})
-                                    {% if member.user == request.user %}<span style="color: #666;">(Вы)</span>{% endif %}
+                                    {% if member.user == user %}<span style="color: #666;">(Вы)</span>{% endif %}
                                 </div>
                             </div>
                         {% empty %}
@@ -104,15 +135,19 @@
                         {% endfor %}
                     </div>
                     
+                    <!-- Блок действий удаления - только при наличии прав -->
+                    {% if can_manage_access %}
                     <div id="kickActions" style="margin-top: 15px; display: none;">
                         <button type="button" onclick="confirmKickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
                             Удалить выбранных
                         </button>
                         <span id="selectedCount" style="margin-left: 10px; color: #666;"></span>
                     </div>
+                    {% endif %}
                 </div>
 
-                <!-- Массовое приглашение -->
+                <!-- Массовое приглашение - только для тех, у кого есть права -->
+                {% if can_manage_access %}
                 <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
                     <h4>Массовое приглашение</h4>
                     
@@ -173,8 +208,22 @@
                     <div id="massInvitationResult" style="margin-top: 15px; display: none;"></div>
                 </div>
 
+                <!-- Управление приглашениями -->
+                <div style="padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;">
+                    <h4>Управление приглашениями</h4>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <span>Статус массового приглашения:</span>
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="toggleAllInvitations" {% if mass_invitation_data.is_active %}checked{% endif %} onchange="toggleAllInvitations()" style="margin-right: 8px;">
+                            <span>{% if mass_invitation_data.is_active %}Активно{% else %}Неактивно{% endif %}</span>
+                        </label>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if can_invite_users %}
                 <!-- Точечное приглашение -->
-                <div style="margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+                <div style="margin-top: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
                     <h4>Точечное приглашение</h4>
                     <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
                         Введите почты или уникальные коды через пробел или Enter
@@ -198,18 +247,13 @@
                     
                     <div id="individualInvitationResult" style="margin-top: 15px; display: none;"></div>
                 </div>
-
-                <!-- Управление приглашениями -->
-                <div style="padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;">
-                    <h4>Управление приглашениями</h4>
-                    <div style="display: flex; align-items: center; gap: 15px;">
-                        <span>Статус массового приглашения:</span>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" id="toggleAllInvitations" {% if mass_invitation_data.is_active %}checked{% endif %} onchange="toggleAllInvitations()" style="margin-right: 8px;">
-                            <span>{% if mass_invitation_data.is_active %}Активно{% else %}Неактивно{% endif %}</span>
-                        </label>
-                    </div>
+                {% endif %}
+                {% if not can_invite_users and not can_manage_access %}
+                <!-- Сообщение для пользователей без прав приглашения -->
+                <div style="padding: 15px; background: #f8f9fa; border-radius: 5px; text-align: center;">
+                    <p style="color: #666; margin: 0;">У вас нет прав для приглашения новых участников</p>
                 </div>
+                {% endif %}
             </div>
 
             <!-- Модальное окно подтверждения удаления -->
@@ -226,12 +270,12 @@
                 </div>
             </div>
 
-            <!-- Администрирование -->
+            <!-- Администрирование - только для владельца -->
+            {% if workspace_user_membership.role == 'owner' %}
             <div id="contentAdmin" style="display: none;">
                 <h3>Администраторы</h3>
                 
                 <!-- Назначение администраторов -->
-                {% if user_membership.role == 'owner' %}
                 <div style="margin-bottom: 30px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                         <h4 style="margin: 0;">Назначить администраторов</h4>
@@ -310,27 +354,11 @@
                         <span id="demoteSelectedCount" style="margin-left: 10px; color: #666;"></span>
                     </div>
                 </div>
-                {% endif %}
-
-                <!-- Список администраторов -->
-                <div>
-                    <h4>Текущие администраторы</h4>
-                    <ul>
-                        {% for member in members %}
-                            {% if member.get_role_display == "Владелец" or member.get_role_display == "Администратор" %}
-                                <li>
-                                    {{ member.user }} ({{ member.get_role_display }})
-                                    {% if member.user == request.user %}<span style="color: #666;">(Вы)</span>{% endif %}
-                                </li>
-                            {% endif %}
-                        {% empty %}
-                            <li>Нет других участников</li>
-                        {% endfor %}
-                    </ul>
-                </div>
             </div>
+            {% endif %}
 
-            <!-- Управление доступом -->
+            <!-- Управление доступом - только для тех, у кого есть права -->
+            {% if can_manage_access %}
             <div id="contentAccess" style="display: none;">
                 <h3>Управление доступом</h3>
                 <p style="color: #666; margin-bottom: 20px;">
@@ -344,11 +372,12 @@
                     <form id="workspaceAccessForm">
                         {% csrf_token %}
                         
+                        {% if workspace_user_membership.role == 'owner' %}
                         <!-- Управление доступом -->
                         <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
                             <h5 style="margin-top: 0; color: #333;">Управление доступом</h5>
                             <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
-                                Кто может управлять доступом к рабочей области (приглашать, удалять пользователей)
+                                Кто может управлять доступом к команде (назначать права, массово приглашать и удалять пользователей)
                             </p>
                             <div class="role-checkboxes">
                                 <label style="display: block; margin-bottom: 8px;">
@@ -365,7 +394,7 @@
                                 </label>
                             </div>
                         </div>
-
+                        {% endif %}
                         <!-- Редактирование рабочей области -->
                         <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
                             <h5 style="margin-top: 0; color: #333;">Редактирование рабочей области</h5>
@@ -506,22 +535,14 @@
 
                     <div id="workspaceAccessResult" style="margin-top: 15px; display: none;"></div>
                 </div>
-
-                <!-- Информация о правах -->
-                <div style="padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #e9ecef;">
-                    <h5 style="margin-top: 0;">Информация о правах</h5>
-                    <ul style="color: #666; font-size: 14px; margin: 0; padding-left: 20px;">
-                        <li><strong>Владелец</strong> всегда имеет все права доступа</li>
-                        <li><strong>Администраторы</strong> имеют расширенные права управления</li>
-                        <li><strong>Участники</strong> имеют базовые права в соответствии с настройками</li>
-                        <li>Изменения вступают в силу немедленно</li>
-                    </ul>
-                </div>
             </div>
+            {% endif %}
         </div>
     </div>
 </div>
 
+<!-- Модальные окна для административных действий -->
+{% if workspace_user_membership.role == 'owner' %}
 <!-- Модальное окно подтверждения назначения -->
 <div id="confirmPromoteModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
     <h3 style="margin-top: 0;">Подтверждение назначения</h3>
@@ -549,6 +570,7 @@
         </button>
     </div>
 </div>
+{% endif %}
 
 <script>
 // Управление модальным окном
@@ -570,13 +592,15 @@ function showContent(section) {
     document.querySelectorAll('[id^="nav"]').forEach(el => el.style.background = '');
     
     const contentElement = document.getElementById(`content${section.charAt(0).toUpperCase() + section.slice(1)}`);
-    contentElement.style.display = 'block';
-    document.getElementById(`nav${section.charAt(0).toUpperCase() + section.slice(1)}`).style.background = '#f0f0f0';
-    
-    if (section === 'members') initMembersSection();
-    if (section === 'access') {
-        // Загружаем настройки при открытии вкладки доступа
-        loadAccessSettings();
+    if (contentElement) {
+        contentElement.style.display = 'block';
+        document.getElementById(`nav${section.charAt(0).toUpperCase() + section.slice(1)}`).style.background = '#f0f0f0';
+        
+        if (section === 'members') initMembersSection();
+        if (section === 'access') {
+            // Загружаем настройки при открытии вкладки доступа
+            loadAccessSettings();
+        }
     }
 }
 
@@ -639,6 +663,37 @@ function updateCheckboxState(settings) {
     });
 }
 
+// Сохранение основных настроек рабочей области
+function saveWorkspaceMainSettings() {
+    const name = document.getElementById('workspaceName').value;
+    const description = document.getElementById('workspaceDescription').value;
+    
+    const formData = new FormData();
+    formData.append('name', name);
+    formData.append('description', description);
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    // Нужно создать соответствующий URL в urls.py и view
+    fetch(`{% url 'workspace:workspace_index' %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Настройки успешно сохранены');
+            location.reload();
+        } else {
+            alert('Ошибка при сохранении: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Ошибка при сохранении настроек');
+    });
+}
+
 // Сохранение настроек доступа рабочей области
 function saveWorkspaceAccessSettings() {
     const form = document.getElementById('workspaceAccessForm');
@@ -646,7 +701,7 @@ function saveWorkspaceAccessSettings() {
     
     // Собираем данные из чекбоксов
     const permissions = [
-        'can_manage_access',
+        {% if workspace_user_membership.role == 'owner' %}'can_manage_access'{% endif %},
         'can_edit_workspace', 
         'can_create_teams',
         'can_create_tasks',

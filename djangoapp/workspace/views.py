@@ -64,6 +64,17 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
         role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
         context['role_access'] = role_access
         
+        # ДОБАВЛЯЕМ ПРАВА ПОЛЬЗОВАТЕЛЯ В КОНТЕКСТ
+        context['can_edit_workspace'] = role_access.has_permission(self.request.user, 'can_edit_workspace')
+        context['can_manage_access'] = role_access.has_permission(self.request.user, 'can_manage_access')
+        context['can_create_teams'] = role_access.has_permission(self.request.user, 'can_create_teams')
+        context['can_create_tasks'] = role_access.has_permission(self.request.user, 'can_create_tasks')
+        context['can_invite_users'] = role_access.has_permission(self.request.user, 'can_invite_users')
+        context['can_edit_tasks'] = role_access.has_permission(self.request.user, 'can_edit_tasks')
+        context['can_delete_tasks'] = role_access.has_permission(self.request.user, 'can_delete_tasks')
+        context['can_view_all_tasks'] = role_access.has_permission(self.request.user, 'can_view_all_tasks')
+        context['can_view_all_teams'] = role_access.has_permission(self.request.user, 'can_view_all_teams')
+        
         # Получаем команды с учетом видимости
         user_teams = Team.objects.filter(
             workspace=workspace,
@@ -71,7 +82,7 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
         )
         
         # Все команды workspace для владельцев и администраторов
-        if workspace.get_user_role(self.request.user) in ['owner', 'admin']:
+        if workspace.get_user_role(self.request.user) in ['owner', 'admin'] or context['can_view_all_teams']:
             context['teams'] = Team.objects.filter(workspace=workspace)
         else:
             # Для обычных пользователей - только команды, которые они видят
@@ -84,16 +95,16 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
             context['teams'] = visible_teams
         
         # Получаем membership текущего пользователя
-        user_membership = WorkspaceMembership.objects.filter(
+        workspace_user_membership = WorkspaceMembership.objects.filter(
             workspace=workspace, 
             user=self.request.user
         ).first()
         
         # Добавляем user_membership в контекст
-        context['user_membership'] = user_membership
+        context['workspace_user_membership'] = workspace_user_membership
         
         # Проверяем права доступа для задач
-        if role_access.has_permission(self.request.user, 'can_view_all_tasks'):
+        if context['can_view_all_tasks']:
             context['tasks'] = Task.objects.filter(workspace=workspace)
         else:
             # Показываем только задачи команд, в которых состоит пользователь
@@ -204,6 +215,11 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
         team_access, created = TeamRoleAccess.objects.get_or_create(team=team)
         context['team_access'] = team_access
         
+        # ДОБАВЛЯЕМ ПРАВА ПОЛЬЗОВАТЕЛЯ В КОНТЕКСТ
+        context['can_manage_access'] = team_access.has_permission(self.request.user, 'can_manage_access')
+        context['can_edit_team'] = team_access.has_permission(self.request.user, 'can_edit_team')
+        context['can_invite_users'] = team_access.has_permission(self.request.user, 'can_invite_users')
+        
         # Получаем текущих участников команды
         team_members = TeamMembership.objects.filter(team=team).select_related('user')
         
@@ -222,7 +238,13 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
         ]
         
         # Получаем membership текущего пользователя
-        user_membership = TeamMembership.objects.filter(
+        workspace_user_membership = WorkspaceMembership.objects.filter(
+            workspace=team.workspace,
+            user=self.request.user
+        ).first()
+        
+        # Получаем membership текущего пользователя
+        team_user_membership = TeamMembership.objects.filter(
             team=team, 
             user=self.request.user
         ).first()
@@ -236,7 +258,8 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
         context['team_members'] = team_members
         context['workspace_members'] = available_users
         context['team_members_users'] = [member.user for member in team_members]
-        context['user_membership'] = user_membership  # Добавляем информацию о текущем пользователе
+        context['workspace_user_membership'] = workspace_user_membership  # Добавляем информацию о текущем пользователе рабочего пространства
+        context['team_user_membership'] = team_user_membership  # Добавляем информацию о текущем пользователе рабочего пространства
         context['members_for_promotion'] = members_for_promotion  # Участники для назначения администраторами
         context['members_for_demotion'] = members_for_demotion    # Администраторы для разжалования
         
@@ -1438,11 +1461,17 @@ class SaveWorkspaceAccessSettingsView(LoginRequiredMixin, View):
                 permission_data = request.POST.get(permission)
                 if permission_data:
                     try:
-                        # Парсим JSON данные
-                        roles = json.loads(permission_data)
-                        # Устанавливаем новые значения
-                        setattr(role_access, permission, roles)
-                        updated_fields.append(permission)
+                        if permission == 'can_manage_access' and workspace.get_user_role(self.request.user) != 'owner':
+                            return JsonResponse({
+                            'success': False, 
+                            'error': 'No permission to manage access'
+                        })
+                        else:
+                            # Парсим JSON данные
+                            roles = json.loads(permission_data)
+                            # Устанавливаем новые значения
+                            setattr(role_access, permission, roles)
+                            updated_fields.append(permission)
                     except json.JSONDecodeError:
                         return JsonResponse({
                             'success': False, 
@@ -1484,10 +1513,16 @@ class SaveTeamAccessSettingsView(LoginRequiredMixin, View):
             return JsonResponse({'success': False, 'error': 'No permission to manage access'})
         
         try:
+            team_user_role = TeamMembership.objects.get(team=team, user=request.user).role
+        except:
+            team_user_role = None
+        workspace_user_role = WorkspaceMembership.objects.get(workspace=team.workspace, user=request.user).role
+        print(workspace_user_role)
+
+        try:
             # Получаем и обновляем настройки для каждого типа прав
             permissions = [
                 'can_manage_access',
-                'can_delete_team', 
                 'can_edit_team',
                 'can_invite_users'
             ]
@@ -1498,11 +1533,17 @@ class SaveTeamAccessSettingsView(LoginRequiredMixin, View):
                 permission_data = request.POST.get(permission)
                 if permission_data:
                     try:
-                        # Парсим JSON данные
-                        roles = json.loads(permission_data)
-                        # Устанавливаем новые значения
-                        setattr(team_access, permission, roles)
-                        updated_fields.append(permission)
+                        if permission == 'can_manage_access' and not (team_user_role == 'leader' or workspace_user_role == 'owner'):
+                            return JsonResponse({
+                            'success': False, 
+                            'error': 'No permission to manage access'
+                        })
+                        else:
+                            # Парсим JSON данные
+                            roles = json.loads(permission_data)
+                            # Устанавливаем новые значения
+                            setattr(team_access, permission, roles)
+                            updated_fields.append(permission)
                     except json.JSONDecodeError:
                         return JsonResponse({
                             'success': False, 
@@ -1583,7 +1624,6 @@ class GetTeamAccessView(LoginRequiredMixin, View):
         # Формируем данные для ответа
         access_data = {
             'can_manage_access': team_access.can_manage_access,
-            'can_delete_team': team_access.can_delete_team,
             'can_edit_team': team_access.can_edit_team,
             'can_invite_users': team_access.can_invite_users,
             'visibility': team_access.visibility,
@@ -1627,6 +1667,8 @@ todo:
         * pinned tasks
 
 edit:
+
+  ⚡️⚡️⚡️ DISABLE SELF DEMOTE
   ⚡️SORT SYSTEM:
     get_queryset in TaskListView – add filters:
         * asigned (to me/to user if admin rules)

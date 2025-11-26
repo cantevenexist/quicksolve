@@ -240,10 +240,6 @@ class WorkspaceRoleAccess(models.Model):
         if user_role == 'owner':
             return True
         
-        # Администраторы workspace имеют все права администратора
-        if user_role == 'admin':
-            return True
-        
         # Проверяем права для конкретного действия
         permission_field = getattr(self, permission_type, [])
         return user_role in permission_field
@@ -330,12 +326,6 @@ class TeamRoleAccess(models.Model):
         help_text="Роли, которые могут управлять доступом к команде"
     )
     
-    # Права удаления команды
-    can_delete_team = models.JSONField(
-        default=list,
-        help_text="Роли, которые могут удалять команду"
-    )
-    
     # Права редактирования команды
     can_edit_team = models.JSONField(
         default=list,
@@ -372,7 +362,6 @@ class TeamRoleAccess(models.Model):
     def set_default_permissions(self):
         """Устанавливает права доступа по умолчанию"""
         self.can_manage_access = ['leader', 'admin', 'member']
-        self.can_delete_team = ['leader', 'admin', 'member']
         self.can_edit_team = ['leader', 'admin', 'member']
         self.can_invite_users = ['leader', 'admin', 'member']
         self.visibility = 'private'
@@ -381,7 +370,7 @@ class TeamRoleAccess(models.Model):
         """Проверяет, имеет ли пользователь указанное право в команде"""
         # Проверяем, является ли пользователь владельцем или администратором workspace
         workspace_role = self.team.workspace.get_user_role(user)
-        if workspace_role in ['owner', 'admin']:
+        if workspace_role == 'owner':
             return True
         
         # Получаем роль пользователя в команде
