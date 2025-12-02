@@ -18,8 +18,10 @@
     {% endwith %}
 </div>
 
-<a href="{% url 'workspace:task_create' team.workspace.url_hash %}?team={{ team.url_hash }}">Создать задачу для этой команды</a>
-<br>
+{% if can_create_tasks %}
+    <a href="{% url 'workspace:task_create' team.workspace.url_hash %}?team={{ team.url_hash }}">Создать задачу для этой команды</a><br>
+{% endif %}
+
 <a href="{% url 'workspace:task_list' team.workspace.url_hash %}?team={{ team.url_hash }}">Показать все задачи команды</a>
 
 <!-- Блок управления -->

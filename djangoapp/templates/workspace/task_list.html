@@ -15,7 +15,9 @@
     </select>
 </form>
 
-<a href="{% url 'workspace:task_create' workspace.url_hash %}">Создать задачу</a>
+{% if can_create_tasks %}
+    <a href="{% url 'workspace:task_create' workspace.url_hash %}">Создать задачу</a>
+{% endif %}
 
 {% if tasks %}
     <ul>

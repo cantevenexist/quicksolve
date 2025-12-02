@@ -213,9 +213,11 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
         
         # Получаем настройки прав доступа команды
         team_access, created = TeamRoleAccess.objects.get_or_create(team=team)
+        workspace_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=team.workspace)
+
         context['team_access'] = team_access
-        
         # ДОБАВЛЯЕМ ПРАВА ПОЛЬЗОВАТЕЛЯ В КОНТЕКСТ
+        context['can_create_tasks'] = workspace_access.has_permission(self.request.user, 'can_create_tasks')
         context['can_manage_access'] = team_access.has_permission(self.request.user, 'can_manage_access')
         context['can_edit_team'] = team_access.has_permission(self.request.user, 'can_edit_team')
         context['can_invite_users'] = team_access.has_permission(self.request.user, 'can_invite_users')
@@ -312,7 +314,8 @@ class TaskListView(LoginRequiredMixin, ListView):
         # Получаем настройки прав доступа
         role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
         context['role_access'] = role_access
-        
+        context['can_create_tasks'] = role_access.has_permission(self.request.user, 'can_create_tasks')
+
         # Получаем команды с учетом видимости
         if role_access.has_permission(self.request.user, 'can_view_all_teams'):
             context['teams'] = Team.objects.filter(workspace=self.workspace)
@@ -1647,9 +1650,10 @@ todo:
         team:
             * set who can set access settings
             * set who can edit team
-            * set who can delete team
-            * set team visible to uninvited user
             * set who can invite members
+            ⚡️* set who can create task
+            ⚡️* set who can edit task
+            ⚡️* set who can delete task
 
         ⚡️⚡️* GetOutWorkspaceView
         ⚡️⚡️* GetOutTeamView
@@ -1667,28 +1671,56 @@ todo:
         * pinned tasks
 
 edit:
-
-  ⚡️⚡️⚡️ DISABLE SELF DEMOTE
-  ⚡️SORT SYSTEM:
+  ⚡️⚡️⚡️SORT SYSTEM:
     get_queryset in TaskListView – add filters:
         * asigned (to me/to user if admin rules)
         * status
         * deadline
         * category
         * pinned (to user)
-  ⚡️FORM: ignore ENTER submit
+  ⚡️⚡️⚡️FORM: ignore ENTER submit
+
+  
++--------------------------------------------------------+
+|  +--------------------------------------------------+  |
+|  |                                                  |  |
+|  |   Отдельное создание задач с проверкой условий:  |  |
+|  |       1) для workspace    2) для команды         |  |
+|  |      Это позволит сделать скрытые задачи в       |  |
+|  |     команде не нарушая правила для workspace     |  |
+|  |                                                  |  |
+|  +--------------------------------------------------+  |
++--------------------------------------------------------+
 
 ⚡️ tasks:
     id
     hash
     workspace
     title
-    about
+    description
     tags
-    author
+    reporter
     asigned
-    visible
-    editable
+    team
+    visible:
+      ☑️ checkboxes:
+        1) hidden (only for reporter) 
+        2) if asigned: + for asigned 
+        3) if team: + for team  admins / members / none (leader see all team tasks)
+        3) if workspace: + for workspace admins / for all workspace users / none (owner see all tasks)
+    editable:
+      ☑️ checkboxes:
+        1) off (only for reporter)
+        2) if asigned: + for asigned / none
+        3) if team: + for team  admins / members / none (leader can edit all team tasks)
+        3) if workspace: + for workspace admins / for all workspace users / none (owner can edit all tasks)
+
+      📋 edit rules list:
+        1) title
+        2) description
+        3) tags
+        4) asigned (asigned user can promote task to another)
+        5) team (if user has_permission)
     status
     category
     deadline
