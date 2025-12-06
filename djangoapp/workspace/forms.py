@@ -1,5 +1,5 @@
 from django import forms
-from .models import Workspace, Team, Task
+from .models import Workspace, Team, Task, WorkspaceRoleAccess, TeamRoleAccess
 
 class WorkspaceCreateForm(forms.ModelForm):
     class Meta:
@@ -69,22 +69,46 @@ class TaskCreateForm(forms.ModelForm):
         self.workspace = kwargs.pop('workspace')
         self.user = kwargs.pop('user')
         self.team_from_get = kwargs.pop('team_from_get', None)
+        self.can_create_in_workspace = kwargs.pop('can_create_in_workspace', False)
+        self.user_teams_with_task_create_rights = kwargs.pop('user_teams_with_task_create_rights', [])
+        
         super().__init__(*args, **kwargs)
         
-        # Ограничиваем выбор команд только командами workspace
-        self.fields['team'].queryset = Team.objects.filter(workspace=self.workspace)
-        self.fields['team'].required = False
-        self.fields['team'].empty_label = "Без команды"
+        # Фильтрация команд в зависимости от прав пользователя
+        self.filter_team_choices()
         
         # Если команда передана из GET параметра, устанавливаем ее по умолчанию
         if self.team_from_get:
             self.fields['team'].initial = self.team_from_get
         
-        # Начальный queryset для исполнителей - все участники workspace
-        workspace_members = self.workspace.get_all_members()
-        self.fields['assignee'].queryset = workspace_members
+        # Динамически обновляем список исполнителей в зависимости от выбранной команды
+        self.fields['assignee'].queryset = self.workspace.get_all_members()
         self.fields['assignee'].required = False
         self.fields['assignee'].empty_label = "Не назначено"
+
+    def filter_team_choices(self):
+        """Фильтрует список команд в зависимости от прав пользователя"""
+        if not self.can_create_in_workspace and not self.user_teams_with_task_create_rights:
+            # У пользователя нет прав нигде
+            self.fields['team'].queryset = Team.objects.none()
+            self.fields['team'].empty_label = "Нет доступных команд"
+        elif not self.can_create_in_workspace and self.user_teams_with_task_create_rights:
+            # Может создавать только в командах с правами
+            self.fields['team'].queryset = Team.objects.filter(
+                id__in=[team.id for team in self.user_teams_with_task_create_rights]
+            )
+            self.fields['team'].empty_label = "Выберите команду"
+        elif self.can_create_in_workspace and not self.user_teams_with_task_create_rights:
+            # Может создавать только без команды
+            self.fields['team'].queryset = Team.objects.none()
+            self.fields['team'].empty_label = "Без команды"
+        else:
+            # Может создавать и в workspace, и в командах с правами
+            all_available_teams = list(self.user_teams_with_task_create_rights)
+            self.fields['team'].queryset = Team.objects.filter(
+                id__in=[team.id for team in all_available_teams]
+            )
+            self.fields['team'].empty_label = "Без команды"
 
     def clean(self):
         cleaned_data = super().clean()
@@ -96,6 +120,23 @@ class TaskCreateForm(forms.ModelForm):
         
         team = cleaned_data.get('team')
         assignee = cleaned_data.get('assignee')
+        
+        # Проверка прав для создания задачи в выбранной команде
+        if team:
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+            if not team_access.has_permission(self.user, 'can_create_tasks'):
+                self.add_error(
+                    'team',
+                    'У вас нет прав для создания задач в этой команде'
+                )
+        else:
+            # Проверка прав для создания задачи без команды (в workspace)
+            workspace_access, _ = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+            if not workspace_access.has_permission(self.user, 'can_create_tasks'):
+                self.add_error(
+                    None,
+                    'У вас нет прав для создания задач без команды'
+                )
         
         # Дополнительная валидация связки команда-исполнитель
         if assignee and team:

@@ -338,6 +338,22 @@ class TeamRoleAccess(models.Model):
         help_text="Роли, которые могут приглашать пользователей в команду"
     )
     
+    # Права для задач
+    can_create_tasks = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут создавать задачи в команде"
+    )
+    
+    can_edit_tasks = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут редактировать задачи в команде"
+    )
+    
+    can_delete_tasks = models.JSONField(
+        default=list,
+        help_text="Роли, которые могут удалять задачи в команде"
+    )
+    
     # Видимость команды
     visibility = models.CharField(
         max_length=20,
@@ -364,6 +380,9 @@ class TeamRoleAccess(models.Model):
         self.can_manage_access = ['leader', 'admin', 'member']
         self.can_edit_team = ['leader', 'admin', 'member']
         self.can_invite_users = ['leader', 'admin', 'member']
+        self.can_create_tasks = ['leader', 'admin', 'member']
+        self.can_edit_tasks = ['leader', 'admin', 'member']
+        self.can_delete_tasks = ['leader', 'admin', 'member']
         self.visibility = 'private'
 
     def has_permission(self, user, permission_type):

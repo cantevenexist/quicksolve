@@ -64,11 +64,31 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
         role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
         context['role_access'] = role_access
         
+        # Право создавать задачи в workspace
+        can_create_task_in_workspace = role_access.has_permission(self.request.user, 'can_create_tasks')
+        
+        # Право создавать задачи в командах, где он состоит
+        user_teams = Team.objects.filter(
+            workspace=workspace,
+            members=self.request.user
+        )
+        
+        can_create_in_any_team = False
+        for team in user_teams:
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+            if team_access.has_permission(self.request.user, 'can_create_tasks'):
+                can_create_in_any_team = True
+                break
+        
+        if can_create_task_in_workspace or can_create_in_any_team: context['can_create_tasks'] = True
+        else: context['can_create_tasks'] = False
+
+
         # ДОБАВЛЯЕМ ПРАВА ПОЛЬЗОВАТЕЛЯ В КОНТЕКСТ
         context['can_edit_workspace'] = role_access.has_permission(self.request.user, 'can_edit_workspace')
         context['can_manage_access'] = role_access.has_permission(self.request.user, 'can_manage_access')
         context['can_create_teams'] = role_access.has_permission(self.request.user, 'can_create_teams')
-        context['can_create_tasks'] = role_access.has_permission(self.request.user, 'can_create_tasks')
+        # context['can_create_tasks'] = role_access.has_permission(self.request.user, 'can_create_tasks')
         context['can_invite_users'] = role_access.has_permission(self.request.user, 'can_invite_users')
         context['can_edit_tasks'] = role_access.has_permission(self.request.user, 'can_edit_tasks')
         context['can_delete_tasks'] = role_access.has_permission(self.request.user, 'can_delete_tasks')
@@ -216,11 +236,20 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
         workspace_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=team.workspace)
 
         context['team_access'] = team_access
-        # ДОБАВЛЯЕМ ПРАВА ПОЛЬЗОВАТЕЛЯ В КОНТЕКСТ
-        context['can_create_tasks'] = workspace_access.has_permission(self.request.user, 'can_create_tasks')
+        context['workspace_access'] = workspace_access  # Добавляем workspace_access для шаблона
+        
+        # Права для workspace
+        context['can_create_tasks_in_workspace'] = workspace_access.has_permission(self.request.user, 'can_create_tasks')
+        context['can_edit_tasks_in_workspace'] = workspace_access.has_permission(self.request.user, 'can_edit_tasks')
+        context['can_delete_tasks_in_workspace'] = workspace_access.has_permission(self.request.user, 'can_delete_tasks')
+
+        # Права для команды
         context['can_manage_access'] = team_access.has_permission(self.request.user, 'can_manage_access')
         context['can_edit_team'] = team_access.has_permission(self.request.user, 'can_edit_team')
         context['can_invite_users'] = team_access.has_permission(self.request.user, 'can_invite_users')
+        context['can_create_tasks_in_team'] = team_access.has_permission(self.request.user, 'can_create_tasks')
+        context['can_edit_tasks_in_team'] = team_access.has_permission(self.request.user, 'can_edit_tasks')
+        context['can_delete_tasks_in_team'] = team_access.has_permission(self.request.user, 'can_delete_tasks')
         
         # Получаем текущих участников команды
         team_members = TeamMembership.objects.filter(team=team).select_related('user')
@@ -245,7 +274,6 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
             user=self.request.user
         ).first()
         
-        # Получаем membership текущего пользователя
         team_user_membership = TeamMembership.objects.filter(
             team=team, 
             user=self.request.user
@@ -296,15 +324,18 @@ class TaskListView(LoginRequiredMixin, ListView):
         # Права доступа через WorkspaceRoleAccess
         role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
         
+        # Фильтрация с учетом видимости команд
         if role_access.has_permission(self.request.user, 'can_view_all_tasks'):
             return queryset.select_related('team', 'assignee', 'reporter')
         else:
-            user_teams = Team.objects.filter(
-                workspace=self.workspace, 
-                members=self.request.user
-            )
+            visible_teams = []
+            all_teams = Team.objects.filter(workspace=self.workspace)
+            for team in all_teams:
+                team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+                if team_access.is_team_visible_to_user(self.request.user):
+                    visible_teams.append(team)
             return queryset.filter(
-                Q(team__in=user_teams) | Q(team__isnull=True)
+                Q(team__in=visible_teams) | Q(team__isnull=True)
             ).select_related('team', 'assignee', 'reporter')
 
     def get_context_data(self, **kwargs):
@@ -347,11 +378,29 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
             url_hash=kwargs['workspace_url_hash']
         )
         
-        # Проверяем право на создание задач
-        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
-        if not role_access.has_permission(request.user, 'can_create_tasks'):
+        # Проверяем, имеет ли пользователь право создавать задачи где-либо
+        workspace_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        
+        # Проверяем право на создание задач в workspace
+        can_create_in_workspace = workspace_access.has_permission(request.user, 'can_create_tasks')
+        
+        # Проверяем, есть ли у пользователя право создавать задачи в командах, где он состоит
+        user_teams = Team.objects.filter(
+            workspace=self.workspace,
+            members=request.user
+        )
+        
+        can_create_in_any_team = False
+        for team in user_teams:
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+            if team_access.has_permission(request.user, 'can_create_tasks'):
+                can_create_in_any_team = True
+                break
+        
+        # Если у пользователя нет прав нигде - показываем 404
+        if not can_create_in_workspace and not can_create_in_any_team:
             from django.http import Http404
-            raise Http404("У вас нет прав для создания задач")
+            raise Http404("У вас нет прав для создания задачи")
             
         return super().dispatch(request, *args, **kwargs)
 
@@ -359,6 +408,10 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
         kwargs = super().get_form_kwargs()
         kwargs['workspace'] = self.workspace
         kwargs['user'] = self.request.user
+        
+        # Получаем права пользователя
+        workspace_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        can_create_in_workspace = workspace_access.has_permission(self.request.user, 'can_create_tasks')
         
         # Получаем команду из GET параметра если есть
         team_from_get = self.request.GET.get('team')
@@ -373,7 +426,64 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
         else:
             kwargs['team_from_get'] = None
             
+        # Добавляем информацию о правах пользователя
+        kwargs['can_create_in_workspace'] = can_create_in_workspace
+        kwargs['user_teams_with_task_create_rights'] = self.get_user_teams_with_task_create_rights()
+        
         return kwargs
+
+    def get_user_teams_with_task_create_rights(self):
+        """Возвращает список команд, где пользователь может создавать задачи"""
+        user_teams = Team.objects.filter(
+            workspace=self.workspace,
+            members=self.request.user
+        )
+        
+        teams_with_rights = []
+        for team in user_teams:
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+            if team_access.has_permission(self.request.user, 'can_create_tasks'):
+                teams_with_rights.append(team)
+        
+        return teams_with_rights
+
+    def get_form_class(self):
+        """Возвращаем форму с учетом прав пользователя"""
+        workspace_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        can_create_in_workspace = workspace_access.has_permission(self.request.user, 'can_create_tasks')
+        user_teams_with_rights = self.get_user_teams_with_task_create_rights()
+        
+        # Создаем динамическую форму на основе прав пользователя
+        class TaskCreateFormWithPermissions(TaskCreateForm):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                
+                # Получаем информацию о правах из kwargs
+                can_create_in_workspace = kwargs.get('can_create_in_workspace', False)
+                user_teams_with_task_create_rights = kwargs.get('user_teams_with_task_create_rights', [])
+                
+                # Логика фильтрации команд
+                if not can_create_in_workspace and not user_teams_with_task_create_rights:
+                    # У пользователя нет прав нигде - это не должно произойти благодаря dispatch
+                    self.fields['team'].queryset = Team.objects.none()
+                elif not can_create_in_workspace and user_teams_with_task_create_rights:
+                    # Может создавать только в командах с правами
+                    self.fields['team'].queryset = Team.objects.filter(
+                        id__in=[team.id for team in user_teams_with_task_create_rights]
+                    )
+                elif can_create_in_workspace and not user_teams_with_task_create_rights:
+                    # Может создавать только без команды
+                    self.fields['team'].queryset = Team.objects.none()
+                    self.fields['team'].empty_label = "Без команды"
+                else:
+                    # Может создавать и в workspace, и в командах с правами
+                    all_available_teams = list(user_teams_with_task_create_rights)
+                    self.fields['team'].queryset = Team.objects.filter(
+                        id__in=[team.id for team in all_available_teams]
+                    )
+                    self.fields['team'].empty_label = "Без команды"
+        
+        return TaskCreateFormWithPermissions
 
     def form_valid(self, form):
         # Устанавливаем workspace и reporter перед сохранением
@@ -397,6 +507,10 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
         role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
         context['role_access'] = role_access
         
+        # Добавляем информацию о правах пользователя
+        context['can_create_in_workspace'] = role_access.has_permission(self.request.user, 'can_create_tasks')
+        context['user_teams_with_task_create_rights'] = self.get_user_teams_with_task_create_rights()
+        
         # Добавляем team_from_get в контекст для шаблона
         team_from_get = self.request.GET.get('team')
         if team_from_get:
@@ -405,10 +519,17 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
                     url_hash=team_from_get,
                     workspace=self.workspace
                 )
+                # Проверяем, имеет ли пользователь право создавать задачи в этой команде
+                team_access, _ = TeamRoleAccess.objects.get_or_create(team=context['team'])
+                context['can_create_in_selected_team'] = team_access.has_permission(
+                    self.request.user, 'can_create_tasks'
+                )
             except Team.DoesNotExist:
                 context['team'] = None
+                context['can_create_in_selected_team'] = False
         else:
             context['team'] = None
+            context['can_create_in_selected_team'] = False
             
         return context
 
@@ -449,15 +570,26 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        task = self.get_object()
         context['workspace'] = self.workspace
         
-        # Получаем настройки прав доступа
-        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
-        context['role_access'] = role_access
+        # Получаем настройки прав доступа workspace
+        workspace_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        context['workspace_access'] = workspace_access
         
-        # Проверяем права на редактирование и удаление задачи
-        context['can_edit_task'] = role_access.has_permission(self.request.user, 'can_edit_tasks')
-        context['can_delete_task'] = role_access.has_permission(self.request.user, 'can_delete_tasks')
+        # Проверяем права на основе наличия команды у задачи
+        if task.team:
+            # Задача привязана к команде - проверяем права команды
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=task.team)
+            context['can_edit_task'] = team_access.has_permission(self.request.user, 'can_edit_tasks')
+            context['can_delete_task'] = team_access.has_permission(self.request.user, 'can_delete_tasks')
+        else:
+            # Задача без команды - проверяем права workspace
+            context['can_edit_task'] = workspace_access.has_permission(self.request.user, 'can_edit_tasks')
+            context['can_delete_task'] = workspace_access.has_permission(self.request.user, 'can_delete_tasks')
+        
+        # Также добавляем общие права для шаблона
+        context['can_create_tasks'] = workspace_access.has_permission(self.request.user, 'can_create_tasks')
         
         return context
 
@@ -1520,14 +1652,16 @@ class SaveTeamAccessSettingsView(LoginRequiredMixin, View):
         except:
             team_user_role = None
         workspace_user_role = WorkspaceMembership.objects.get(workspace=team.workspace, user=request.user).role
-        print(workspace_user_role)
-
+        
         try:
             # Получаем и обновляем настройки для каждого типа прав
             permissions = [
                 'can_manage_access',
                 'can_edit_team',
-                'can_invite_users'
+                'can_invite_users',
+                'can_create_tasks',
+                'can_edit_tasks',
+                'can_delete_tasks',
             ]
             
             updated_fields = []
@@ -1629,6 +1763,9 @@ class GetTeamAccessView(LoginRequiredMixin, View):
             'can_manage_access': team_access.can_manage_access,
             'can_edit_team': team_access.can_edit_team,
             'can_invite_users': team_access.can_invite_users,
+            'can_create_tasks': team_access.can_create_tasks,
+            'can_edit_tasks': team_access.can_edit_tasks,
+            'can_delete_tasks': team_access.can_delete_tasks,
             'visibility': team_access.visibility,
         }
         
@@ -1638,7 +1775,7 @@ class GetTeamAccessView(LoginRequiredMixin, View):
         })
 '''
 todo:
-    ⚡️ role system:
+    ✅ role system:
         workspace:
             * set who can set access settings
             * set who can edit workspace
@@ -1651,16 +1788,16 @@ todo:
             * set who can set access settings
             * set who can edit team
             * set who can invite members
-            ⚡️* set who can create task
-            ⚡️* set who can edit task
-            ⚡️* set who can delete task
+            * set who can create task
+            * set who can edit task
+            * set who can delete task
 
-        ⚡️⚡️* GetOutWorkspaceView
-        ⚡️⚡️* GetOutTeamView
-        ⚡️⚡️⚡️* WorkspaceEditView
-        ⚡️⚡️⚡️* TeamEditView
+        ⚡️* GetOutWorkspaceView
+        ⚡️* GetOutTeamView
+        ⚡️* WorkspaceEditView
+        ⚡️* TeamEditView
     
-    ✏️ medium important:
+    ⚡️ medium important:
         * ProfileAvatar
         * WorkspaceAvatar
         * TeamAvatar
@@ -1671,14 +1808,14 @@ todo:
         * pinned tasks
 
 edit:
-  ⚡️⚡️⚡️SORT SYSTEM:
+  ⚡️SORT SYSTEM:
     get_queryset in TaskListView – add filters:
         * asigned (to me/to user if admin rules)
         * status
         * deadline
         * category
         * pinned (to user)
-  ⚡️⚡️⚡️FORM: ignore ENTER submit
+  ⚡️FORM: ignore ENTER submit
 
   
 +--------------------------------------------------------+
@@ -1691,6 +1828,49 @@ edit:
 |  |                                                  |  |
 |  +--------------------------------------------------+  |
 +--------------------------------------------------------+
+
+
++-----------------------------+     __
+| +-------------------------+ |     ||
+| |  Редакторы и видимость  | |     ||
+| |    тикета – примеры     | |    =++=
+| +-------------------------+ |    \##/
++-----------------------------+     \/
+
+WORKSPACE
++------+---------+-----+-----+
+| team | editors |asign| vis |
++------+---------+-----+-----+
+|  --  | adm,mmb |<usr>| True| -> Редакторы все участники workspace, тикет открытый
++------+---------+-----+-----+
+|  --  |   ---   | --- | True| -> Только общий просмотр для всех в workspace
++------+---------+-----+-----+
+|  --  |   ---   | --- |False| -> Нет редакторов или исполнителя - нет вьюеров кроме создателя
++------+---------+-----+-----+
+
+OPEN TEAM
++------+---------+-----+-----+
+| team | editors |asign| vis |
++------+---------+-----+-----+
+| open | adm,mmb |<usr>| True| -> Редакторы все участники команды, тикет открытый
++------+---------+-----+-----+
+| open |   ---   | --- | True| -> Только общий просмотр для всех в workspace
++------+---------+-----+-----+
+| open |   ---   | --- |False| -> Нет редакторов или исполнителя - нет вьюеров кроме создателя
++------+---------+-----+-----+
+
+CLOSED TEAM
++------+---------+-----+-----+
+| team | editors |asign| vis |
++------+---------+-----+-----+
+|closed| adm,mmb |<usr>| True| -> Редакторы все участники команды, тикет открытый
++------+---------+-----+-----+
+|closed|   ---   | --- | True| -> Только общий просмотр для всех в команде
++------+---------+-----+-----+
+|closed|   ---   | --- |False| -> Нет редакторов или исполнителя - нет вьюеров кроме создателя
++------+---------+-----+-----+
+
+
 
 ⚡️ tasks:
     id

@@ -1,5 +1,6 @@
 {% extends 'layout.html' %}
 {% block content %}
+
 <div style="display: flex; flex-direction: row; gap: 10px">
     <h1>{{ team.name }}</h1>
     {% if team_user_membership.user %}
@@ -18,7 +19,7 @@
     {% endwith %}
 </div>
 
-{% if can_create_tasks %}
+{% if can_create_tasks_in_team %}
     <a href="{% url 'workspace:task_create' team.workspace.url_hash %}?team={{ team.url_hash }}">Создать задачу для этой команды</a><br>
 {% endif %}
 
@@ -338,6 +339,72 @@
                             </div>
                         </div>
 
+                        <!-- СОЗДАНИЕ ЗАДАЧ -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Создание задач</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может создавать задачи в этой команде
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_create_tasks" value="leader" checked disabled>
+                                    Лидер
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_create_tasks" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_create_tasks" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- РЕДАКТИРОВАНИЕ ЗАДАЧ -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Редактирование задач</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может редактировать задачи в этой команде
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_edit_tasks" value="leader" checked disabled>
+                                    Лидер
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_edit_tasks" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_edit_tasks" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- УДАЛЕНИЕ ЗАДАЧ -->
+                        <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                            <h5 style="margin-top: 0; color: #333;">Удаление задач</h5>
+                            <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                                Кто может удалять задачи в этой команде
+                            </p>
+                            <div class="role-checkboxes">
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_delete_tasks" value="leader" checked disabled>
+                                    Лидер
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_delete_tasks" value="admin">
+                                    Администраторы
+                                </label>
+                                <label style="display: block; margin-bottom: 8px;">
+                                    <input type="checkbox" name="can_delete_tasks" value="member">
+                                    Участники
+                                </label>
+                            </div>
+                        </div>
+
                         <!-- Видимость команды -->
                         <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px;">
                             <h5 style="margin-top: 0; color: #333;">Видимость команды</h5>
@@ -497,11 +564,15 @@ function loadTeamAccessSettings() {
 }
 
 // Функция для обновления состояния чекбоксов команды на основе данных
+// Функция для обновления состояния чекбоксов команды на основе данных
 function updateTeamCheckboxState(settings) {
     const permissions = [
         'can_manage_access',
         'can_edit_team',
-        'can_invite_users'
+        'can_invite_users',
+        'can_create_tasks',
+        'can_edit_tasks',
+        'can_delete_tasks'
     ];
     
     permissions.forEach(permission => {
@@ -538,7 +609,10 @@ function saveTeamAccessSettings() {
     const permissions = [
         {% if team_user_membership.role == 'leader' or workspace_user_membership.role == 'owner' %}'can_manage_access',{% endif %}
         'can_edit_team',
-        'can_invite_users'
+        'can_invite_users',
+        'can_create_tasks',
+        'can_edit_tasks',
+        'can_delete_tasks'
     ];
     
     permissions.forEach(permission => {
@@ -579,15 +653,6 @@ function saveTeamAccessSettings() {
         document.getElementById('teamAccessResult').style.display = 'block';
     });
 }
-
-// Удалите старые функции, которые использовали данные из контекста
-// function updateTeamAccessCheckboxes() {
-//     // Больше не используем данные из контекста
-//     loadTeamAccessSettings();
-// }
-
-// Остальной JavaScript код остается без изменений...
-// [Остальной JavaScript код из вашего шаблона остается здесь без изменений]
 
 // Функция для добавления выбранных пользователей
 function addSelectedUsers() {
