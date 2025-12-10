@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, ListView, DetailView
@@ -16,6 +17,7 @@ User = get_user_model()
 from .models import Workspace, WorkspaceMembership, Team, TeamMembership, Task, IndividualInvitation, WorkspaceRoleAccess, TeamRoleAccess
 from .forms import WorkspaceCreateForm, TeamCreateForm, TaskCreateForm, MassInvitationForm, IndividualInvitationForm
 from user_profile.models import UserProfile, Notification
+from django import forms
 
 
 class WorkspaceIndexView(LoginRequiredMixin, ListView):
@@ -300,7 +302,7 @@ class TaskListView(LoginRequiredMixin, ListView):
     model = Task
     template_name = 'workspace/task_list.html'
     context_object_name = 'tasks'
-    paginate_by = 20
+    # paginate_by = 20
 
     def dispatch(self, request, *args, **kwargs):
         self.workspace = get_object_or_404(
@@ -314,6 +316,7 @@ class TaskListView(LoginRequiredMixin, ListView):
         return super().dispatch(request, *args, **kwargs)
 
     def get_queryset(self):
+        # Начинаем с фильтрации по workspace
         queryset = Task.objects.filter(workspace=self.workspace)
         
         # Фильтрация по команде через GET параметр
@@ -321,32 +324,158 @@ class TaskListView(LoginRequiredMixin, ListView):
         if team_filter:
             queryset = queryset.filter(team__url_hash=team_filter)
         
+        # Фильтрация по приоритету через GET параметр
+        priority_filter = self.request.GET.get('priority')
+        if priority_filter:
+            queryset = queryset.filter(priority=priority_filter)
+        
+        # Фильтрация по статусу через GET параметр
+        status_filter = self.request.GET.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        # Фильтрация по дедлайну через GET параметр
+        deadline_filter = self.request.GET.get('deadline')
+        if deadline_filter:
+            if deadline_filter == 'expired':
+                queryset = queryset.filter(deadline__lt=timezone.now())
+            elif deadline_filter == 'today':
+                today = timezone.now().date()
+                queryset = queryset.filter(
+                    deadline__date=today
+                )
+            elif deadline_filter == 'week':
+                week_end = timezone.now() + timezone.timedelta(days=7)
+                queryset = queryset.filter(
+                    deadline__range=[timezone.now(), week_end]
+                )
+            elif deadline_filter == 'future':
+                queryset = queryset.filter(deadline__gt=timezone.now())
+        
+        # Фильтрация по назначенному исполнителю
+        assignee_filter = self.request.GET.get('assignee')
+        if assignee_filter:
+            if assignee_filter == 'me':
+                queryset = queryset.filter(assignee=self.request.user)
+            elif assignee_filter == 'none':
+                queryset = queryset.filter(assignee__isnull=True)
+            else:
+                # Пытаемся преобразовать в число, если это ID пользователя
+                try:
+                    user_id = int(assignee_filter)
+                    queryset = queryset.filter(assignee__id=user_id)
+                except (ValueError, TypeError):
+                    # Если не число, игнорируем фильтр
+                    pass
+        
+        # Фильтрация по автору задачи
+        reporter_filter = self.request.GET.get('reporter')
+        if reporter_filter:
+            if reporter_filter == 'me':
+                queryset = queryset.filter(reporter=self.request.user)
+            else:
+                # Пытаемся преобразовать в число, если это ID пользователя
+                try:
+                    user_id = int(reporter_filter)
+                    queryset = queryset.filter(reporter__id=user_id)
+                except (ValueError, TypeError):
+                    # Если не число, игнорируем фильтр
+                    pass
+        
+        # Сортировка через GET параметр
+        sort_by = self.request.GET.get('sort', '-created_at')
+        if sort_by in ['created_at', '-created_at', 'deadline', '-deadline', 'title', '-title', 'priority', '-priority']:
+            queryset = queryset.order_by(sort_by)
+        
         # Права доступа через WorkspaceRoleAccess
         role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
         
-        # Фильтрация с учетом видимости команд
+        # Если пользователь имеет право просматривать все задачи
         if role_access.has_permission(self.request.user, 'can_view_all_tasks'):
-            return queryset.select_related('team', 'assignee', 'reporter')
+            # Владелец или администратор видит все задачи
+            filtered_tasks = []
+            for task in queryset.select_related('team', 'assignee', 'reporter', 'updated_by'):
+                # Проверяем видимость для каждого пользователя
+                if task.is_visible_to_user(self.request.user):
+                    filtered_tasks.append(task.id)
+            
+            # Возвращаем отфильтрованные задачи
+            if filtered_tasks:
+                return Task.objects.filter(id__in=filtered_tasks).select_related(
+                    'team', 'assignee', 'reporter', 'updated_by'
+                ).order_by(sort_by)
+            else:
+                return Task.objects.none()
         else:
+            # Фильтрация с учетом видимости команд и задач
             visible_teams = []
             all_teams = Team.objects.filter(workspace=self.workspace)
             for team in all_teams:
                 team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
                 if team_access.is_team_visible_to_user(self.request.user):
                     visible_teams.append(team)
-            return queryset.filter(
+            
+            # Фильтруем задачи по видимым командам или отсутствию команды
+            queryset = queryset.filter(
                 Q(team__in=visible_teams) | Q(team__isnull=True)
-            ).select_related('team', 'assignee', 'reporter')
+            )
+            
+            # Дополнительная фильтрация по видимости задач
+            filtered_tasks = []
+            for task in queryset.select_related('team', 'assignee', 'reporter', 'updated_by'):
+                if task.is_visible_to_user(self.request.user):
+                    filtered_tasks.append(task.id)
+            
+            # Возвращаем отфильтрованные задачи
+            if filtered_tasks:
+                return Task.objects.filter(id__in=filtered_tasks).select_related(
+                    'team', 'assignee', 'reporter', 'updated_by'
+                ).order_by(sort_by)
+            else:
+                return Task.objects.none()
 
+        
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['workspace'] = self.workspace
         
         # Получаем настройки прав доступа
         role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
-        context['role_access'] = role_access
-        context['can_create_tasks'] = role_access.has_permission(self.request.user, 'can_create_tasks')
 
+        # Право создавать задачи в workspace
+        can_create_task_in_workspace = role_access.has_permission(self.request.user, 'can_create_tasks')
+        context['role_access'] = role_access
+
+        # Право создавать задачи в командах, где он состоит
+        user_teams = Team.objects.filter(
+            workspace=self.workspace,
+            members=self.request.user
+        )
+        
+        can_create_in_any_team = False
+        for team in user_teams:
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+            if team_access.has_permission(self.request.user, 'can_create_tasks'):
+                can_create_in_any_team = True
+                break
+        
+        if can_create_task_in_workspace or can_create_in_any_team: context['can_create_tasks'] = True
+        else: context['can_create_tasks'] = False
+                
+        # Получаем текущего пользователя для отображения его задач
+        context['current_user'] = self.request.user
+        context['now'] = timezone.now()
+        
+        # Получаем все возможные значения для фильтров
+        context['priority_choices'] = Task.PRIORITY_CHOICES
+        context['status_choices'] = Task.STATUS_CHOICES
+        context['deadline_filters'] = [
+            ('expired', 'Просроченные'),
+            ('today', 'На сегодня'),
+            ('week', 'На неделю'),
+            ('future', 'Будущие'),
+        ]
+        
         # Получаем команды с учетом видимости
         if role_access.has_permission(self.request.user, 'can_view_all_teams'):
             context['teams'] = Team.objects.filter(workspace=self.workspace)
@@ -359,10 +488,103 @@ class TaskListView(LoginRequiredMixin, ListView):
                     visible_teams.append(team)
             context['teams'] = visible_teams
         
-        # Добавляем выбранную команду для фильтрации
-        selected_team = self.request.GET.get('team')
-        if selected_team:
-            context['selected_team'] = get_object_or_404(Team, url_hash=selected_team)
+        # Получаем всех участников workspace для фильтра по исполнителю/автору
+        workspace_members = WorkspaceMembership.objects.filter(
+            workspace=self.workspace
+        ).select_related('user')
+        context['workspace_members'] = [member.user for member in workspace_members]
+        
+        # Добавляем выбранные фильтры для сохранения состояния формы
+        context['selected_filters'] = {
+            'team': self.request.GET.get('team'),
+            'priority': self.request.GET.get('priority'),
+            'status': self.request.GET.get('status'),
+            'deadline': self.request.GET.get('deadline'),
+            'assignee': self.request.GET.get('assignee'),
+            'reporter': self.request.GET.get('reporter'),
+            'sort': self.request.GET.get('sort', '-created_at'),
+        }
+        
+        # Если выбран фильтр по команде, добавляем команду в контекст
+        selected_team_hash = self.request.GET.get('team')
+        if selected_team_hash:
+            try:
+                context['selected_team'] = Team.objects.get(
+                    url_hash=selected_team_hash,
+                    workspace=self.workspace
+                )
+            except Team.DoesNotExist:
+                context['selected_team'] = None
+        
+        # Если выбран фильтр по исполнителю, добавляем информацию в контекст
+        selected_assignee = self.request.GET.get('assignee')
+        if selected_assignee:
+            context['selected_assignee_filter'] = selected_assignee
+            if selected_assignee == 'me':
+                context['selected_assignee_user'] = self.request.user
+            elif selected_assignee == 'none':
+                context['selected_assignee_user'] = None
+            else:
+                try:
+                    user_id = int(selected_assignee)
+                    context['selected_assignee_user'] = User.objects.get(id=user_id)
+                except (ValueError, TypeError, User.DoesNotExist):
+                    context['selected_assignee_user'] = None
+        
+        # Если выбран фильтр по автору, добавляем информацию в контекст
+        selected_reporter = self.request.GET.get('reporter')
+        if selected_reporter:
+            context['selected_reporter_filter'] = selected_reporter
+            if selected_reporter == 'me':
+                context['selected_reporter_user'] = self.request.user
+            else:
+                try:
+                    user_id = int(selected_reporter)
+                    context['selected_reporter_user'] = User.objects.get(id=user_id)
+                except (ValueError, TypeError, User.DoesNotExist):
+                    context['selected_reporter_user'] = None
+        
+        # Добавляем статистику по задачам
+        tasks_queryset = self.get_queryset()
+        context['tasks_count'] = tasks_queryset.count()
+        context['tasks_expired_count'] = tasks_queryset.filter(
+            deadline__lt=timezone.now(),
+            status__in=['backlog', 'todo', 'in_progress', 'review']
+        ).count()
+        
+        # Задачи, назначенные на текущего пользователя
+        context['my_assigned_tasks_count'] = tasks_queryset.filter(
+            assignee=self.request.user
+        ).count()
+        
+        # Задачи, созданные текущим пользователем
+        context['my_reported_tasks_count'] = tasks_queryset.filter(
+            reporter=self.request.user
+        ).count()
+        
+        # Добавляем форму для быстрого создания задачи (если есть права)
+        # if context['can_create_tasks']:
+        #     # Проверяем, может ли пользователь создавать задачи в workspace
+        #     workspace_access, _ = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+        #     can_create_in_workspace = workspace_access.has_permission(self.request.user, 'can_create_tasks')
+            
+        #     # Проверяем, может ли пользователь создавать задачи в командах
+        #     user_teams_with_rights = []
+        #     user_teams = Team.objects.filter(
+        #         workspace=self.workspace,
+        #         members=self.request.user
+        #     )
+        #     for team in user_teams:
+        #         team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+        #         if team_access.has_permission(self.request.user, 'can_create_tasks'):
+        #             user_teams_with_rights.append(team)
+            
+        #     context['quick_task_form'] = TaskCreateForm(
+        #         workspace=self.workspace,
+        #         user=self.request.user,
+        #         can_create_in_workspace=can_create_in_workspace,
+        #         user_teams_with_task_create_rights=user_teams_with_rights
+        #     )
         
         return context
 
@@ -489,7 +711,8 @@ class TaskCreateView(LoginRequiredMixin, CreateView):
         # Устанавливаем workspace и reporter перед сохранением
         form.instance.workspace = self.workspace
         form.instance.reporter = self.request.user
-            
+        form.instance.updated_by = self.request.user  # Добавляем updated_by
+        
         response = super().form_valid(form)
         messages.success(self.request, 'Задача успешно создана!')
         return response
@@ -551,47 +774,500 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
             raise Http404("У вас нет доступа к этой рабочей области")
         return super().dispatch(request, *args, **kwargs)
 
-    def get_queryset(self):
-        # Права доступа через WorkspaceRoleAccess
-        role_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+    def get_object(self, queryset=None):
+        """Получаем объект задачи с проверкой видимости"""
+        task = super().get_object(queryset)
         
-        if role_access.has_permission(self.request.user, 'can_view_all_tasks'):
-            return Task.objects.filter(workspace=self.workspace)
-        else:
-            user_teams = Team.objects.filter(
-                workspace=self.workspace, 
-                members=self.request.user
-            )
-            return Task.objects.filter(
-                workspace=self.workspace
-            ).filter(
-                Q(team__in=user_teams) | Q(team__isnull=True)
-            )
+        # Проверяем, видна ли задача пользователю
+        if not task.is_visible_to_user(self.request.user):
+            from django.http import Http404
+            raise Http404("У вас нет доступа к этой задаче")
+        
+        return task
+
+    def get_queryset(self):
+        return Task.objects.filter(workspace=self.workspace)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         task = self.get_object()
         context['workspace'] = self.workspace
+        context['now'] = timezone.now()
         
         # Получаем настройки прав доступа workspace
         workspace_access, created = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
         context['workspace_access'] = workspace_access
         
-        # Проверяем права на основе наличия команды у задачи
+        # Определяем, является ли пользователь редактором задачи
+        context['is_editor'] = task.can_user_edit(self.request.user)
+        context['is_special_editor'] = task.is_special_editor(self.request.user)
+        
+        # Проверяем права редактирования для конкретных полей
         if task.team:
-            # Задача привязана к команде - проверяем права команды
+            # Задача привязана к команде
             team_access, _ = TeamRoleAccess.objects.get_or_create(team=task.team)
-            context['can_edit_task'] = team_access.has_permission(self.request.user, 'can_edit_tasks')
+            context['team_access'] = team_access
+            
+            # Получаем информацию о лидере команды
+            try:
+                team_leader = TeamMembership.objects.get(team=task.team, role='leader')
+                context['team_leader'] = team_leader.user
+                context['is_team_leader'] = (team_leader.user == self.request.user)
+            except TeamMembership.DoesNotExist:
+                context['team_leader'] = None
+                context['is_team_leader'] = False
+            
+            # Определяем, является ли пользователь обычным редактором команды
+            try:
+                team_membership = TeamMembership.objects.get(team=task.team, user=self.request.user)
+                context['is_team_editor'] = team_access.has_permission(self.request.user, 'can_edit_tasks')
+            except TeamMembership.DoesNotExist:
+                context['is_team_editor'] = False
+        else:
+            context['team_access'] = None
+            context['team_leader'] = None
+            context['is_team_leader'] = False
+            context['is_team_editor'] = False
+        
+        # Получаем информацию о владельце workspace
+        try:
+            workspace_owner_membership = WorkspaceMembership.objects.get(
+                workspace=self.workspace,
+                role='owner'
+            )
+            context['workspace_owner'] = workspace_owner_membership.user
+            context['is_workspace_owner'] = (workspace_owner_membership.user == self.request.user)
+        except WorkspaceMembership.DoesNotExist:
+            context['workspace_owner'] = None
+            context['is_workspace_owner'] = False
+        
+        # Для workspace задач определяем, является ли пользователь редактором workspace
+        if not task.team:
+            try:
+                workspace_membership = WorkspaceMembership.objects.get(
+                    workspace=self.workspace,
+                    user=self.request.user
+                )
+                context['is_workspace_editor'] = workspace_access.has_permission(self.request.user, 'can_edit_tasks')
+            except WorkspaceMembership.DoesNotExist:
+                context['is_workspace_editor'] = False
+        else:
+            context['is_workspace_editor'] = False
+        
+        # Права на редактирование конкретных аспектов задачи
+        context['can_edit_content'] = task.can_user_edit_content(self.request.user)
+        context['can_edit_team'] = task.can_user_edit_team(self.request.user)
+        context['can_edit_assignee'] = task.can_user_edit_assignee(self.request.user)
+        context['can_edit_visibility'] = task.can_user_edit_visibility(self.request.user)
+        
+        # Права на изменение прав доступа к задаче
+        context['can_change_permissions'] = task.can_user_change_permissions(self.request.user)
+        
+        # Права на удаление задачи
+        if task.team:
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=task.team)
             context['can_delete_task'] = team_access.has_permission(self.request.user, 'can_delete_tasks')
         else:
-            # Задача без команды - проверяем права workspace
-            context['can_edit_task'] = workspace_access.has_permission(self.request.user, 'can_edit_tasks')
             context['can_delete_task'] = workspace_access.has_permission(self.request.user, 'can_delete_tasks')
         
-        # Также добавляем общие права для шаблона
+        # Общие права для шаблона
         context['can_create_tasks'] = workspace_access.has_permission(self.request.user, 'can_create_tasks')
         
+        # Получаем список всех редакторов задачи
+        context['editors'] = task.get_editors()
+        
+        # Получаем доступных исполнителей для формы изменения
+        context['available_assignees'] = task.get_available_assignees()
+        
+        # Получаем доступные команды для формы изменения
+        available_teams = []
+        if task.team:
+            # Если есть текущая команда, включаем ее в список
+            available_teams.append(task.team)
+        
+        # Добавляем команды, где пользователь может создавать задачи
+        user_teams = Team.objects.filter(
+            workspace=self.workspace,
+            members=self.request.user
+        )
+        for team in user_teams:
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+            if team_access.has_permission(self.request.user, 'can_create_tasks'):
+                if team not in available_teams:
+                    available_teams.append(team)
+        
+        context['available_teams'] = available_teams
+        
+        # Добавляем информацию для навигации
+        context['task_list_url'] = reverse('workspace:task_list', kwargs={
+            'workspace_url_hash': self.workspace.url_hash
+        })
+        
+        if task.team:
+            context['team_detail_url'] = reverse('workspace:team_detail', kwargs={
+                'workspace_url_hash': self.workspace.url_hash,
+                'team_url_hash': task.team.url_hash
+            })
+        
+        # Добавляем информацию о просроченности задачи
+        if task.deadline and task.deadline < timezone.now() and task.status != 'done':
+            context['is_overdue'] = True
+            context['overdue_days'] = (timezone.now() - task.deadline).days
+        else:
+            context['is_overdue'] = False
+        
+        # Добавляем информацию о правах для отображения в интерфейсе
+        context['user_is_reporter'] = (self.request.user == task.reporter)
+        context['user_is_assignee'] = (task.assignee and self.request.user == task.assignee)
+        
+        # Добавляем текущие права задачи для отображения
+        context['task_permissions'] = {
+            'can_edit_content': task.can_edit_content,
+            'can_edit_team': task.can_edit_team,
+            'can_edit_assignee': task.can_edit_assignee,
+            'can_edit_visibility': task.can_edit_visibility,
+        }
+        
         return context
+
+    def post(self, request, *args, **kwargs):
+        """Обработка AJAX POST-запросов"""
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        task = self.get_object()
+        action = request.POST.get('action')
+        
+        if action == 'update_task':
+            return self.handle_task_update(request, task)
+        elif action == 'update_permissions':
+            return self.handle_permissions_update(request, task)
+        elif action == 'delete_task':
+            return self.handle_task_delete(request, task)
+        else:
+            return JsonResponse({
+                'success': False, 
+                'error': 'Unknown action'
+            })
+    
+    def handle_task_update(self, request, task):
+        """Обработка обновления параметров задачи"""
+        try:
+            # Проверяем, является ли пользователь редактором
+            if not task.can_user_edit(request.user):
+                return JsonResponse({
+                    'success': False, 
+                    'error': 'У вас нет прав для редактирования этой задачи'
+                })
+            
+            # Собираем данные для обновления
+            update_data = {}
+            validation_errors = []
+            has_changes = False
+            
+            # Обрабатываем только те поля, которые пришли в запросе
+            # и которые пользователь имеет право редактировать
+            
+            # Содержание (название, описание, статус, приоритет)
+            content_fields = ['title', 'description', 'status', 'priority']
+            for field in content_fields:
+                if field in request.POST:
+                    if not task.can_user_edit_content(request.user):
+                        # Пропускаем поле, если нет прав
+                        continue
+                    
+                    new_value = request.POST[field]
+                    current_value = getattr(task, field)
+                    
+                    # Для строковых полей сравниваем значения
+                    if isinstance(current_value, str):
+                        if new_value != current_value:
+                            update_data[field] = new_value
+                            has_changes = True
+                    # Для других типов проверяем на равенство
+                    elif str(new_value) != str(current_value):
+                        update_data[field] = new_value
+                        has_changes = True
+            
+            # Особенная обработка дедлайна
+            if 'deadline' in request.POST:
+                if not task.can_user_edit_content(request.user):
+                    # Пропускаем, если нет прав
+                    pass
+                else:
+                    deadline_str = request.POST['deadline'].strip()
+                    current_deadline = task.deadline
+                    
+                    # Проверяем, изменился ли дедлайн
+                    if deadline_str:
+                        try:
+                            from django.utils.dateparse import parse_datetime
+                            new_deadline = parse_datetime(deadline_str)
+                            if new_deadline:
+                                if not current_deadline or new_deadline != current_deadline:
+                                    update_data['deadline'] = new_deadline
+                                    has_changes = True
+                            else:
+                                validation_errors.append('Некорректный формат даты для дедлайна')
+                        except Exception:
+                            validation_errors.append('Некорректный формат даты для дедлайна')
+                    else:
+                        # Пустая строка означает удаление дедлайна
+                        if current_deadline is not None:
+                            update_data['deadline'] = None
+                            has_changes = True
+            
+            # Команда
+            if 'team' in request.POST:
+                if not task.can_user_edit_team(request.user):
+                    # Пропускаем, если нет прав
+                    pass
+                else:
+                    team_id = request.POST['team'].strip()
+                    current_team_id = str(task.team.id) if task.team else ''
+                    
+                    if team_id != current_team_id:
+                        if team_id:
+                            try:
+                                new_team = Team.objects.get(
+                                    id=int(team_id),
+                                    workspace=self.workspace
+                                )
+                                update_data['team'] = new_team
+                                has_changes = True
+                            except (ValueError, Team.DoesNotExist):
+                                validation_errors.append('Выбранная команда не найдена')
+                        else:
+                            # Проверяем, может ли пользователь убрать команду
+                            if task.team is not None:
+                                workspace_access, _ = WorkspaceRoleAccess.objects.get_or_create(
+                                    workspace=self.workspace
+                                )
+                                can_create_task_in_workspace = workspace_access.has_permission(
+                                    self.request.user, 
+                                    'can_create_tasks'
+                                )
+                                
+                                if can_create_task_in_workspace:
+                                    update_data['team'] = None
+                                    has_changes = True
+                                else:
+                                    validation_errors.append(
+                                        'У вас нет прав на создание задач в рабочей области. '
+                                        'Вы не можете убрать команду из задачи.'
+                                    )
+            
+            # Исполнитель
+            if 'assignee' in request.POST:
+                if not task.can_user_edit_assignee(request.user):
+                    # Пропускаем, если нет прав
+                    pass
+                else:
+                    assignee_id = request.POST['assignee'].strip()
+                    current_assignee_id = str(task.assignee.id) if task.assignee else ''
+                    
+                    if assignee_id != current_assignee_id:
+                        if assignee_id:
+                            try:
+                                new_assignee = User.objects.get(id=int(assignee_id))
+                                update_data['assignee'] = new_assignee
+                                has_changes = True
+                            except (ValueError, User.DoesNotExist):
+                                validation_errors.append('Выбранный исполнитель не найден')
+                        else:
+                            update_data['assignee'] = None
+                            has_changes = True
+            
+            # Видимость
+            if 'visible' in request.POST:
+                if not task.can_user_edit_visibility(request.user):
+                    # Пропускаем, если нет прав
+                    pass
+                else:
+                    new_visible = (request.POST['visible'] == 'on')
+                    if new_visible != task.visible:
+                        update_data['visible'] = new_visible
+                        has_changes = True
+            
+            # Если есть ошибки валидации, возвращаем их
+            if validation_errors:
+                return JsonResponse({
+                    'success': False,
+                    'errors': validation_errors
+                })
+            
+            # Проверяем, есть ли изменения для сохранения
+            if not has_changes:
+                return JsonResponse({
+                    'success': True,
+                    'message': 'Нет изменений для сохранения'
+                })
+            
+            # Обновляем задачу
+            try:
+                # Используем упрощенную логику обновления
+                for field, value in update_data.items():
+                    setattr(task, field, value)
+                
+                # Устанавливаем, кто обновил задачу
+                task.updated_by = request.user
+                
+                # Выполняем полную валидацию перед сохранением
+                task.full_clean()
+                task.save()
+                
+                # Возвращаем обновленные данные задачи
+                return JsonResponse({
+                    'success': True,
+                    'message': 'Задача успешно обновлена',
+                    'task_data': {
+                        'title': task.title,
+                        'description': task.description,
+                        'status': task.status,
+                        'status_display': task.get_status_display(),
+                        'priority': task.priority,
+                        'priority_display': task.get_priority_display(),
+                        'deadline': task.deadline.isoformat() if task.deadline else None,
+                        'deadline_display': task.deadline.strftime('%d.%m.%Y %H:%M') if task.deadline else 'Не установлен',
+                        'assignee': {
+                            'id': task.assignee.id if task.assignee else None,
+                            'username': task.assignee.username if task.assignee else None
+                        } if task.assignee else None,
+                        'team': {
+                            'id': task.team.id if task.team else None,
+                            'name': task.team.name if task.team else None,
+                            'url_hash': task.team.url_hash if task.team else None
+                        } if task.team else None,
+                        'visible': task.visible,
+                        'updated_at': task.updated_at.isoformat(),
+                        'updated_by': task.updated_by.username if task.updated_by else None,
+                        'is_overdue': task.deadline and task.deadline < timezone.now() and task.status != 'done'
+                    }
+                })
+                
+            except ValidationError as e:
+                # Обрабатываем ошибки валидации модели
+                error_messages = []
+                if hasattr(e, 'error_dict'):
+                    for field, errors in e.error_dict.items():
+                        for error in errors:
+                            error_messages.append(f'{field}: {error.message}')
+                else:
+                    error_messages.append(str(e))
+                
+                return JsonResponse({
+                    'success': False,
+                    'errors': error_messages
+                })
+                
+            except Exception as e:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Ошибка при обновлении задачи: {str(e)}'
+                })
+                
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': f'Ошибка при обновлении задачи: {str(e)}'
+            })
+    
+    def handle_permissions_update(self, request, task):
+        """Обработка обновления прав доступа к задаче"""
+        try:
+            if not task.can_user_change_permissions(request.user):
+                return JsonResponse({
+                    'success': False,
+                    'error': 'У вас нет прав для изменения прав доступа к этой задаче'
+                })
+            
+            # Собираем данные для обновления прав
+            permissions_data = {}
+            permission_fields = ['can_edit_content', 'can_edit_team', 
+                               'can_edit_assignee', 'can_edit_visibility']
+            
+            for field in permission_fields:
+                if field in request.POST:
+                    # Значение будет 'on' если чекбокс отмечен, 'off' если нет
+                    permissions_data[field] = (request.POST[field] == 'on')
+            
+            if permissions_data:
+                # Обновляем права
+                for field, value in permissions_data.items():
+                    setattr(task, field, value)
+                
+                # Сохраняем изменения
+                task.updated_by = request.user
+                task.save()
+                
+                return JsonResponse({
+                    'success': True,
+                    'message': 'Права доступа к задаче успешно обновлены',
+                    'permissions': {
+                        'can_edit_content': task.can_edit_content,
+                        'can_edit_team': task.can_edit_team,
+                        'can_edit_assignee': task.can_edit_assignee,
+                        'can_edit_visibility': task.can_edit_visibility
+                    }
+                })
+            else:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Не получены данные для обновления прав'
+                })
+                
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': f'Ошибка при обновлении прав доступа: {str(e)}'
+            })
+    
+    def handle_task_delete(self, request, task):
+        """Обработка удаления задачи"""
+        try:
+            # Проверяем права на удаление
+            if task.team:
+                team_access, _ = TeamRoleAccess.objects.get_or_create(team=task.team)
+                can_delete = team_access.has_permission(request.user, 'can_delete_tasks')
+            else:
+                workspace_access, _ = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+                can_delete = workspace_access.has_permission(request.user, 'can_delete_tasks')
+            
+            if not can_delete:
+                return JsonResponse({   
+                    'success': False,
+                    'error': 'У вас нет прав для удаления этой задачи'
+                })
+            
+            # Сохраняем информацию для перенаправления
+            task_title = task.title
+            task_team = task.team
+            
+            # Удаляем задачу
+            task.delete()
+            
+            # Определяем URL для перенаправления
+            if task_team:
+                redirect_url = reverse('workspace:team_detail', kwargs={
+                    'workspace_url_hash': self.workspace.url_hash,
+                    'team_url_hash': task_team.url_hash
+                })
+            else:
+                redirect_url = reverse('workspace:task_list', kwargs={
+                    'workspace_url_hash': self.workspace.url_hash
+                })
+            
+            return JsonResponse({
+                'success': True,
+                'message': f'Задача "{task_title}" успешно удалена',
+                'redirect_url': redirect_url
+            })
+                
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': f'Ошибка при удалении задачи: {str(e)}'
+            })
 
 
 class CreateMassInvitationView(LoginRequiredMixin, View):
@@ -1775,27 +2451,10 @@ class GetTeamAccessView(LoginRequiredMixin, View):
         })
 '''
 todo:
-    ✅ role system:
-        workspace:
-            * set who can set access settings
-            * set who can edit workspace
-            * set who can create team
-            * set who can create task
-            * set who can edit task
-            * set who can delete task
-            * set who can invite members
-        team:
-            * set who can set access settings
-            * set who can edit team
-            * set who can invite members
-            * set who can create task
-            * set who can edit task
-            * set who can delete task
-
-        ⚡️* GetOutWorkspaceView
-        ⚡️* GetOutTeamView
-        ⚡️* WorkspaceEditView
-        ⚡️* TeamEditView
+    ⚡️* GetOutWorkspaceView
+    ⚡️* GetOutTeamView
+    ⚡️* WorkspaceEditView
+    ⚡️* TeamEditView
     
     ⚡️ medium important:
         * ProfileAvatar
@@ -1808,103 +2467,5 @@ todo:
         * pinned tasks
 
 edit:
-  ⚡️SORT SYSTEM:
-    get_queryset in TaskListView – add filters:
-        * asigned (to me/to user if admin rules)
-        * status
-        * deadline
-        * category
-        * pinned (to user)
   ⚡️FORM: ignore ENTER submit
-
-  
-+--------------------------------------------------------+
-|  +--------------------------------------------------+  |
-|  |                                                  |  |
-|  |   Отдельное создание задач с проверкой условий:  |  |
-|  |       1) для workspace    2) для команды         |  |
-|  |      Это позволит сделать скрытые задачи в       |  |
-|  |     команде не нарушая правила для workspace     |  |
-|  |                                                  |  |
-|  +--------------------------------------------------+  |
-+--------------------------------------------------------+
-
-
-+-----------------------------+     __
-| +-------------------------+ |     ||
-| |  Редакторы и видимость  | |     ||
-| |    тикета – примеры     | |    =++=
-| +-------------------------+ |    \##/
-+-----------------------------+     \/
-
-WORKSPACE
-+------+---------+-----+-----+
-| team | editors |asign| vis |
-+------+---------+-----+-----+
-|  --  | adm,mmb |<usr>| True| -> Редакторы все участники workspace, тикет открытый
-+------+---------+-----+-----+
-|  --  |   ---   | --- | True| -> Только общий просмотр для всех в workspace
-+------+---------+-----+-----+
-|  --  |   ---   | --- |False| -> Нет редакторов или исполнителя - нет вьюеров кроме создателя
-+------+---------+-----+-----+
-
-OPEN TEAM
-+------+---------+-----+-----+
-| team | editors |asign| vis |
-+------+---------+-----+-----+
-| open | adm,mmb |<usr>| True| -> Редакторы все участники команды, тикет открытый
-+------+---------+-----+-----+
-| open |   ---   | --- | True| -> Только общий просмотр для всех в workspace
-+------+---------+-----+-----+
-| open |   ---   | --- |False| -> Нет редакторов или исполнителя - нет вьюеров кроме создателя
-+------+---------+-----+-----+
-
-CLOSED TEAM
-+------+---------+-----+-----+
-| team | editors |asign| vis |
-+------+---------+-----+-----+
-|closed| adm,mmb |<usr>| True| -> Редакторы все участники команды, тикет открытый
-+------+---------+-----+-----+
-|closed|   ---   | --- | True| -> Только общий просмотр для всех в команде
-+------+---------+-----+-----+
-|closed|   ---   | --- |False| -> Нет редакторов или исполнителя - нет вьюеров кроме создателя
-+------+---------+-----+-----+
-
-
-
-⚡️ tasks:
-    id
-    hash
-    workspace
-    title
-    description
-    tags
-    reporter
-    asigned
-    team
-    visible:
-      ☑️ checkboxes:
-        1) hidden (only for reporter) 
-        2) if asigned: + for asigned 
-        3) if team: + for team  admins / members / none (leader see all team tasks)
-        3) if workspace: + for workspace admins / for all workspace users / none (owner see all tasks)
-    editable:
-      ☑️ checkboxes:
-        1) off (only for reporter)
-        2) if asigned: + for asigned / none
-        3) if team: + for team  admins / members / none (leader can edit all team tasks)
-        3) if workspace: + for workspace admins / for all workspace users / none (owner can edit all tasks)
-
-      📋 edit rules list:
-        1) title
-        2) description
-        3) tags
-        4) asigned (asigned user can promote task to another)
-        5) team (if user has_permission)
-    status
-    category
-    deadline
-    created_at
-    updated_at
-    chat
 '''

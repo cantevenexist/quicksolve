@@ -34,7 +34,11 @@ class TeamCreateForm(forms.ModelForm):
 class TaskCreateForm(forms.ModelForm):
     class Meta:
         model = Task
-        fields = ['title', 'description', 'team', 'assignee', 'status']
+        fields = [
+            'title', 'description', 'team', 'assignee', 'status', 
+            'priority', 'deadline', 'visible',
+            'can_edit_content', 'can_edit_team', 'can_edit_assignee', 'can_edit_visibility'
+        ]
         widgets = {
             'title': forms.TextInput(attrs={
                 'class': 'form-control',
@@ -56,6 +60,28 @@ class TaskCreateForm(forms.ModelForm):
             'status': forms.Select(attrs={
                 'class': 'form-control'
             }),
+            'priority': forms.Select(attrs={
+                'class': 'form-control'
+            }),
+            'deadline': forms.DateTimeInput(attrs={
+                'class': 'form-control',
+                'type': 'datetime-local'
+            }),
+            'visible': forms.CheckboxInput(attrs={
+                'class': 'form-check-input'
+            }),
+            'can_edit_content': forms.CheckboxInput(attrs={
+                'class': 'form-check-input'
+            }),
+            'can_edit_team': forms.CheckboxInput(attrs={
+                'class': 'form-check-input'
+            }),
+            'can_edit_assignee': forms.CheckboxInput(attrs={
+                'class': 'form-check-input'
+            }),
+            'can_edit_visibility': forms.CheckboxInput(attrs={
+                'class': 'form-check-input'
+            }),
         }
         labels = {
             'title': 'Название задачи',
@@ -63,6 +89,13 @@ class TaskCreateForm(forms.ModelForm):
             'team': 'Команда',
             'assignee': 'Исполнитель',
             'status': 'Статус',
+            'priority': 'Приоритет',
+            'deadline': 'Дедлайн',
+            'visible': 'Видимая задача',
+            'can_edit_content': 'Редакторы могут изменять содержание',
+            'can_edit_team': 'Редакторы могут изменять команду',
+            'can_edit_assignee': 'Редакторы могут изменять исполнителя',
+            'can_edit_visibility': 'Редакторы могут изменять видимость',
         }
 
     def __init__(self, *args, **kwargs):
@@ -85,6 +118,13 @@ class TaskCreateForm(forms.ModelForm):
         self.fields['assignee'].queryset = self.workspace.get_all_members()
         self.fields['assignee'].required = False
         self.fields['assignee'].empty_label = "Не назначено"
+        
+        # Устанавливаем значения по умолчанию
+        self.fields['visible'].initial = True
+        self.fields['can_edit_content'].initial = True
+        self.fields['can_edit_team'].initial = True
+        self.fields['can_edit_assignee'].initial = True
+        self.fields['can_edit_visibility'].initial = True
 
     def filter_team_choices(self):
         """Фильтрует список команд в зависимости от прав пользователя"""

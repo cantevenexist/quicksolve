@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 import hashlib
 import time
 import uuid
@@ -439,6 +440,14 @@ class Task(models.Model):
         ('done', 'Выполнено'),
     ]
     
+    PRIORITY_CHOICES = [
+        ('none', 'Не указан'),
+        ('low', 'Низкий'),
+        ('medium', 'Средний'),
+        ('high', 'Высокий'),
+        ('very_high', 'Очень высокий'),
+    ]
+    
     workspace = models.ForeignKey(
         Workspace, 
         on_delete=models.CASCADE,
@@ -466,6 +475,12 @@ class Task(models.Model):
         default='backlog',
         verbose_name='Статус'
     )
+    priority = models.CharField(
+        max_length=20,
+        choices=PRIORITY_CHOICES,
+        default='none',
+        verbose_name='Приоритет'
+    )
     assignee = models.ForeignKey(
         User, 
         on_delete=models.SET_NULL, 
@@ -480,6 +495,35 @@ class Task(models.Model):
         related_name='reported_tasks',
         verbose_name='Автор'
     )
+    
+    deadline = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='Дедлайн'
+    )
+    visible = models.BooleanField(
+        default=True,
+        verbose_name='Видимый'
+    )
+    
+    # Права редактирования для обычных редакторов (не создателя, не владельца, не лидера)
+    can_edit_content = models.BooleanField(
+        default=True,
+        verbose_name='Редакторы могут изменять содержание'
+    )
+    can_edit_team = models.BooleanField(
+        default=True,
+        verbose_name='Редакторы могут изменять команду'
+    )
+    can_edit_assignee = models.BooleanField(
+        default=True,
+        verbose_name='Редакторы могут изменять исполнителя'
+    )
+    can_edit_visibility = models.BooleanField(
+        default=True,
+        verbose_name='Редакторы могут изменять видимость'
+    )
+    
     url_hash = models.CharField(
         max_length=64, 
         unique=True, 
@@ -490,11 +534,38 @@ class Task(models.Model):
         auto_now_add=True,
         verbose_name='Дата создания'
     )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Дата обновления'
+    )
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_tasks',
+        verbose_name='Кем обновлено'
+    )
 
     class Meta:
         verbose_name = 'Задача'
         verbose_name_plural = 'Задачи'
         ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        # Генерируем URL hash если его нет
+        if not self.url_hash:
+            server_time = str(time.time())
+            hash_input = f"{self.title}{server_time}{self.workspace.name}{uuid.uuid4()}"
+            self.url_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()
+        
+        # Если это создание новой задачи, устанавливаем updated_by
+        if not self.pk and self.reporter:
+            self.updated_by = self.reporter
+        
+        # Выполняем валидацию
+        self.clean()
+        super().save(*args, **kwargs)
 
     def clean(self):
         """Валидация данных задачи"""
@@ -520,19 +591,12 @@ class Task(models.Model):
             if not self.workspace.has_access(self.assignee):
                 errors['assignee'] = 'Исполнитель должен быть участником рабочей области'
 
+        # Проверяем дедлайн
+        if self.deadline and self.deadline < timezone.now():
+            errors['deadline'] = 'Дедлайн не может быть в прошлом'
+
         if errors:
             raise ValidationError(errors)
-
-    def save(self, *args, **kwargs):
-        # Генерируем URL hash если его нет
-        if not self.url_hash:
-            server_time = str(time.time())
-            hash_input = f"{self.title}{server_time}{self.workspace.name}{uuid.uuid4()}"
-            self.url_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()
-        
-        # Выполняем валидацию
-        self.clean()
-        super().save(*args, **kwargs)
 
     def get_available_assignees(self):
         """Возвращает доступных исполнителей для задачи"""
@@ -542,6 +606,220 @@ class Task(models.Model):
         else:
             # Если команды нет - все участники workspace
             return self.workspace.get_all_members()
+
+    def get_editors(self):
+        """
+        Возвращает список пользователей, которые могут редактировать эту задачу
+        согласно правилам:
+        1. Создатель задачи (ВСЕГДА)
+        2. Владелец рабочей области (ВСЕГДА)
+        3. Лидер команды (если задача назначена на команду) (ВСЕГДА)
+        4. Исполнитель задачи (если назначен)
+        5. Пользователи с правом редактирования задач в workspace/team
+        """
+        editors = set()
+        
+        # 1. Создатель задачи (ВСЕГДА)
+        editors.add(self.reporter)
+        
+        # 2. Владелец рабочей области (ВСЕГДА)
+        workspace_owner = WorkspaceMembership.objects.filter(
+            workspace=self.workspace,
+            role='owner'
+        ).first()
+        if workspace_owner:
+            editors.add(workspace_owner.user)
+        
+        # 3. Лидер команды (если задача назначена на команду) (ВСЕГДА)
+        if self.team:
+            team_leader = TeamMembership.objects.filter(
+                team=self.team,
+                role='leader'
+            ).first()
+            if team_leader:
+                editors.add(team_leader.user)
+        
+        # 4. Исполнитель задачи (если назначен)
+        if self.assignee:
+            editors.add(self.assignee)
+        
+        # 5. Пользователи с правом редактирования задач в workspace/team
+        if self.team:
+            # Для задач в команде - проверяем права в команде
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=self.team)
+            team_members = TeamMembership.objects.filter(team=self.team)
+            for member in team_members:
+                if team_access.has_permission(member.user, 'can_edit_tasks'):
+                    editors.add(member.user)
+        else:
+            # Для задач без команды - проверяем права в workspace
+            workspace_access, _ = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+            workspace_members = WorkspaceMembership.objects.filter(workspace=self.workspace)
+            for member in workspace_members:
+                if workspace_access.has_permission(member.user, 'can_edit_tasks'):
+                    editors.add(member.user)
+        
+        return list(editors)
+
+    def is_special_editor(self, user):
+        """
+        Проверяет, является ли пользователь особым редактором:
+        - Создатель
+        - Владелец workspace  
+        - Лидер команды (если задача в команде)
+        Эти пользователи имеют ВСЕ права ВСЕГДА
+        """
+        # 1. Создатель задачи (ВСЕГДА)
+        if user == self.reporter:
+            return True
+        
+        # 2. Владелец рабочей области (ВСЕГДА)
+        workspace_owner_membership = WorkspaceMembership.objects.filter(
+            workspace=self.workspace,
+            user=user,
+            role='owner'
+        ).first()
+        if workspace_owner_membership:
+            return True
+        
+        # 3. Лидер команды (если задача назначена на команду) (ВСЕГДА)
+        if self.team:
+            team_leader_membership = TeamMembership.objects.filter(
+                team=self.team,
+                user=user,
+                role='leader'
+            ).first()
+            if team_leader_membership:
+                return True
+        
+        return False
+
+    def can_user_edit(self, user):
+        """Проверяет, может ли пользователь редактировать эту задачу"""
+        # Специальные редакторы могут редактировать всегда
+        if self.is_special_editor(user):
+            return True
+        
+        # Исполнитель задачи может редактировать
+        if self.assignee and user == self.assignee:
+            return True
+        
+        # Обычные редакторы из команды/workspace
+        if self.team:
+            # Для задач в команде
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=self.team)
+            try:
+                team_membership = TeamMembership.objects.get(team=self.team, user=user)
+                return team_access.has_permission(user, 'can_edit_tasks')
+            except TeamMembership.DoesNotExist:
+                return False
+        else:
+            # Для задач без команды
+            workspace_access, _ = WorkspaceRoleAccess.objects.get_or_create(workspace=self.workspace)
+            try:
+                workspace_membership = WorkspaceMembership.objects.get(workspace=self.workspace, user=user)
+                return workspace_access.has_permission(user, 'can_edit_tasks')
+            except WorkspaceMembership.DoesNotExist:
+                return False
+
+    def can_user_edit_content(self, user):
+        """Проверяет, может ли пользователь редактировать содержание задачи"""
+        if not self.can_user_edit(user):
+            return False
+        
+        # Специальные редакторы могут редактировать всегда
+        if self.is_special_editor(user):
+            return True
+        
+        # Для обычных редакторов - проверяем настройки задачи
+        return self.can_edit_content
+
+    def can_user_edit_team(self, user):
+        """Проверяет, может ли пользователь изменять команду задачи"""
+        if not self.can_user_edit(user):
+            return False
+        
+        # Специальные редакторы могут редактировать всегда
+        if self.is_special_editor(user):
+            return True
+        
+        # Для обычных редакторов - проверяем настройки задачи
+        return self.can_edit_team
+
+    def can_user_edit_assignee(self, user):
+        """Проверяет, может ли пользователь изменять исполнителя задачи"""
+        if not self.can_user_edit(user):
+            return False
+        
+        # Специальные редакторы могут редактировать всегда
+        if self.is_special_editor(user):
+            return True
+        
+        # Для обычных редакторов - проверяем настройки задачи
+        return self.can_edit_assignee
+
+    def can_user_edit_visibility(self, user):
+        """Проверяет, может ли пользователь изменять видимость задачи"""
+        if not self.can_user_edit(user):
+            return False
+        
+        # Специальные редакторы могут редактировать всегда
+        if self.is_special_editor(user):
+            return True
+        
+        # Для обычных редакторов - проверяем настройки задачи
+        return self.can_edit_visibility
+
+    def is_visible_to_user(self, user):
+        """
+        Проверяет, видна ли задача пользователю
+        Согласно правилам:
+        1. Создатель задачи всегда видит ее
+        2. Исполнитель задачи всегда видит ее
+        3. Редакторы задачи всегда видят ее
+        4. Лидер команды видит все задачи в команде
+        5. Владелец workspace видит все задачи
+        6. Для остальных: зависит от настройки visible
+        """
+        # 1. Создатель всегда видит
+        if user == self.reporter:
+            return True
+        
+        # 2. Исполнитель всегда видит
+        if self.assignee and user == self.assignee:
+            return True
+        
+        # 3. Редакторы всегда видят
+        if self.can_user_edit(user):
+            return True
+        
+        # 4. Лидер команды видит все задачи в команде
+        if self.team:
+            try:
+                membership = TeamMembership.objects.get(team=self.team, user=user)
+                if membership.role == 'leader':
+                    return True
+            except TeamMembership.DoesNotExist:
+                pass
+        
+        # 5. Владелец workspace видит все задачи
+        workspace_membership = WorkspaceMembership.objects.filter(
+            workspace=self.workspace,
+            user=user,
+            role='owner'
+        ).first()
+        if workspace_membership:
+            return True
+        
+        # 6. Для остальных - зависит от настройки visible
+        return self.visible
+
+    def can_user_change_permissions(self, user):
+        """
+        Проверяет, может ли пользователь изменять права доступа к задаче
+        Только: создатель, владелец workspace, лидер команды (если есть)
+        """
+        return self.is_special_editor(user)
 
     def __str__(self):
         return f'{self.title} (Workspace: {self.workspace.name})'

@@ -2,43 +2,297 @@
 {% block content %}
 <h1>Задачи в {{ workspace.name }}</h1>
 
-<h2>Фильтр по командам:</h2>
-<form method="get">
-    <select name="team" onchange="this.form.submit()">
-        <option value="">Все команды</option>
-        {% for team in teams %}
-            <option value="{{ team.url_hash }}" 
-                {% if selected_team and selected_team.url_hash == team.url_hash %}selected{% endif %}>
-                {{ team.name }}
-            </option>
-        {% endfor %}
-    </select>
-</form>
+<!-- Ссылка назад -->
+<a href="{% url 'workspace:workspace_detail' workspace.url_hash %}">← Назад к рабочей области</a>
 
 {% if can_create_tasks %}
-    <a href="{% url 'workspace:task_create' workspace.url_hash %}">Создать задачу</a>
+    <div style="margin: 15px 0;">
+        <a href="{% url 'workspace:task_create' workspace.url_hash %}">+ Создать новую задачу</a>
+    </div>
 {% endif %}
+
+<!-- Блок статистики -->
+<div style="margin: 20px 0; padding: 10px; background-color: #f5f5f5;">
+    <strong>Статистика:</strong>
+    Всего задач: {{ tasks_count }}
+    | Просрочено: {{ tasks_expired_count }}
+    | Назначено на меня: {{ my_assigned_tasks_count }}
+    | Создано мной: {{ my_reported_tasks_count }}
+</div>
+
+<!-- Фильтры -->
+<h2>Фильтры задач</h2>
+<form method="get" style="display:flex; flex-direction: row; gap: 15px; background-color: #f5f5f5; overflow: scroll;">
+    
+    <!-- Фильтр по команде -->
+    <div style="width:min-content; ">
+        <label>Команда:</label>
+        <select name="team">
+            <option value="">Все команды</option>
+            {% for team in teams %}
+                <option value="{{ team.url_hash }}" 
+                    {% if selected_filters.team == team.url_hash %}selected{% endif %}>
+                    {{ team.name }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+    
+    <!-- Фильтр по приоритету -->
+    <div style="width: min-content ;">
+        <label>Приоритет:</label>
+        <select name="priority">
+            <option value="">Любой приоритет</option>
+            {% for value, label in priority_choices %}
+                <option value="{{ value }}" 
+                    {% if selected_filters.priority == value %}selected{% endif %}>
+                    {{ label }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+    
+    <!-- Фильтр по статусу -->
+    <div style="width: min-content ;">
+        <label>Статус:</label>
+        <select name="status">
+            <option value="">Любой статус</option>
+            {% for value, label in status_choices %}
+                <option value="{{ value }}" 
+                    {% if selected_filters.status == value %}selected{% endif %}>
+                    {{ label }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+    
+    <!-- Фильтр по дедлайну -->
+    <div style="width: min-content ;">
+        <label>Дедлайн:</label>
+        <select name="deadline">
+            <option value="">Все сроки</option>
+            <option value="expired" {% if selected_filters.deadline == 'expired' %}selected{% endif %}>Просроченные</option>
+            <option value="today" {% if selected_filters.deadline == 'today' %}selected{% endif %}>На сегодня</option>
+            <option value="week" {% if selected_filters.deadline == 'week' %}selected{% endif %}>На неделю</option>
+            <option value="future" {% if selected_filters.deadline == 'future' %}selected{% endif %}>Будущие</option>
+        </select>
+    </div>
+    
+    <!-- Фильтр по исполнителю -->
+    <div style="width: min-content ;">
+        <label>Исполнитель:</label>
+        <select name="assignee">
+            <option value="">Любой исполнитель</option>
+            <option value="me" {% if selected_filters.assignee == 'me' %}selected{% endif %}>Назначено на меня</option>
+            <option value="none" {% if selected_filters.assignee == 'none' %}selected{% endif %}>Не назначено</option>
+            {% for member in workspace_members %}
+                <option value="{{ member.id }}" 
+                    {% if selected_filters.assignee == member.id|stringformat:"s" %}selected{% endif %}>
+                    {{ member.username }} ({{ member.email }})
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+    
+    <!-- Фильтр по автору -->
+    <div style="width: min-content ;">
+        <label>Автор:</label>
+        <select name="reporter">
+            <option value="">Любой автор</option>
+            <option value="me" {% if selected_filters.reporter == 'me' %}selected{% endif %}>Создано мной</option>
+            {% for member in workspace_members %}
+                <option value="{{ member.id }}" 
+                    {% if selected_filters.reporter == member.id|stringformat:"s" %}selected{% endif %}>
+                    {{ member.username }} ({{ member.email }})
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+    
+    <!-- Сортировка -->
+    <div style="width: min-content ;">
+        <label>Сортировка:</label>
+        <select name="sort">
+            <option value="-created_at" {% if selected_filters.sort == '-created_at' %}selected{% endif %}>Сначала новые</option>
+            <option value="created_at" {% if selected_filters.sort == 'created_at' %}selected{% endif %}>Сначала старые</option>
+            <option value="deadline" {% if selected_filters.sort == 'deadline' %}selected{% endif %}>Дедлайн (по возрастанию)</option>
+            <option value="-deadline" {% if selected_filters.sort == '-deadline' %}selected{% endif %}>Дедлайн (по убыванию)</option>
+            <option value="priority" {% if selected_filters.sort == 'priority' %}selected{% endif %}>Приоритет (по возрастанию)</option>
+            <option value="-priority" {% if selected_filters.sort == '-priority' %}selected{% endif %}>Приоритет (по убыванию)</option>
+            <option value="title" {% if selected_filters.sort == 'title' %}selected{% endif %}>По названию (А-Я)</option>
+            <option value="-title" {% if selected_filters.sort == '-title' %}selected{% endif %}>По названию (Я-А)</option>
+        </select>
+    </div>
+    
+    <div style="width: min-content ;">
+        <button type="submit" style="height: 100%;">Применить фильтры</button>
+    </div>
+
+    <div style="width: min-content ;">
+        <a href="{% url 'workspace:task_list' workspace.url_hash %}" style="height: 100%;">Сбросить фильтры</a>
+    </div>
+</form>
+
+<!-- Информация о текущих фильтрах -->
+{% if selected_filters.team or selected_filters.priority or selected_filters.status or selected_filters.deadline or selected_filters.assignee or selected_filters.reporter %}
+    <div style="margin: 10px 0; padding: 8px; background-color: #e8f4f8; border-radius: 4px;">
+        <strong>Примененные фильтры:</strong>
+        {% if selected_team %} Команда: {{ selected_team.name }} |{% endif %}
+        {% if selected_filters.priority %} Приоритет: {{ selected_filters.priority }} |{% endif %}
+        {% if selected_filters.status %} Статус: {{ selected_filters.status }} |{% endif %}
+        {% if selected_filters.deadline %} Срок: {{ selected_filters.deadline }} |{% endif %}
+        {% if selected_filters.assignee == 'me' %} Исполнитель: Я |{% endif %}
+        {% if selected_filters.assignee == 'none' %} Исполнитель: Не назначен |{% endif %}
+        {% if selected_assignee_user and selected_filters.assignee != 'me' and selected_filters.assignee != 'none' %} Исполнитель: {{ selected_assignee_user.username }} |{% endif %}
+        {% if selected_filters.reporter == 'me' %} Автор: Я |{% endif %}
+        {% if selected_reporter_user and selected_filters.reporter != 'me' %} Автор: {{ selected_reporter_user.username }} |{% endif %}
+        {% if selected_filters.sort %} Сортировка: {{ selected_filters.sort }} |{% endif %}
+    </div>
+{% endif %}
+
+<!-- Список задач -->
+<h2>Список задач ({{ tasks_count }})</h2>
 
 {% if tasks %}
-    <ul>
-    {% for task in tasks %}
-        <li>
-            <a href="{% url 'workspace:task_detail' workspace.url_hash task.url_hash %}">
-                {{ task.title }} ({{ task.get_status_display }})
-            </a>
-            {% if task.team %}
-            - 
-            <a href="{% url 'workspace:team_detail' workspace.url_hash task.team.url_hash %}">
-                {{ task.team.name }}
-            </a>
+<div style="overflow: scroll;">
+    <table border="1" cellpadding="10" cellspacing="0" width="100%">
+        <thead>
+            <tr>
+                <th>Название</th>
+                <th>Описание</th>
+                <th>Статус</th>
+                <th>Приоритет</th>
+                <th>Исполнитель</th>
+                <th>Команда</th>
+                <th>Дедлайн</th>
+                <th>Автор</th>
+                <th>Создано</th>
+                <th>Обновлено</th>
+                <th>Видимость</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in tasks %}
+            <tr>
+                <td>
+                    <a href="{% url 'workspace:task_detail' workspace.url_hash task.url_hash %}">
+                        {{ task.title|truncatechars:50 }}
+                    </a>
+                    {% if not task.visible %}
+                        <span style="color: #888;">(скрытая)</span>
+                    {% endif %}
+                </td>
+                <td>{{ task.description }}</td>
+                <td>{{ task.get_status_display }}</td>
+                <td>{{ task.get_priority_display }}</td>
+                <td>
+                    {% if task.assignee %}
+                        {{ task.assignee.username }}
+                        {% if task.assignee == current_user %}
+                            <span style="color: blue;">(Вы)</span>
+                        {% endif %}
+                    {% else %}
+                        <span style="color: #888;">Не назначен</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if task.team %}
+                        <a href="{% url 'workspace:team_detail' workspace.url_hash task.team.url_hash %}">
+                            {{ task.team.name }}
+                        </a>
+                    {% else %}
+                        <span style="color: #888;">Без команды</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if task.deadline %}
+                        {{ task.deadline|date:"d.m.Y H:i" }}
+                        {% if task.deadline < now and task.status != 'done' %}
+                            <span style="color: red;">(просрочено)</span>
+                        {% endif %}
+                    {% else %}
+                        <span style="color: #888;">Нет</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ task.reporter.username }}
+                    {% if task.reporter == current_user %}
+                        <span style="color: green;">(Вы)</span>
+                    {% endif %}
+                </td>
+                <td>{{ task.created_at|date:"d.m.Y H:i" }}</td>
+                <td>
+                    {% if task.updated_by %}
+                        {{ task.updated_by.username }}<br>
+                        <small>{{ task.updated_at|date:"d.m.Y H:i" }}</small>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if task.visible %}
+                        <span style="color: green;">Открытая</span>
+                    {% else %}
+                        <span style="color: orange;">Скрытая</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <!-- Пагинация -->
+    {% if is_paginated %}
+        <div style="margin-top: 20px;">
+            <span>Страницы:</span>
+            {% if page_obj.has_previous %}
+                <a href="?page=1{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Первая</a>
+                <a href="?page={{ page_obj.previous_page_number }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Предыдущая</a>
             {% endif %}
-        </li>
-    {% endfor %}
-    </ul>
+            
+            <span>Страница {{ page_obj.number }} из {{ page_obj.paginator.num_pages }}</span>
+            
+            {% if page_obj.has_next %}
+                <a href="?page={{ page_obj.next_page_number }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Следующая</a>
+                <a href="?page={{ page_obj.paginator.num_pages }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Последняя</a>
+            {% endif %}
+        </div>
+    {% endif %}
+    
 {% else %}
-    <p>Нет задач</p>
+    <p>Задачи не найдены. Попробуйте изменить фильтры поиска.</p>
 {% endif %}
 
-<a href="{% url 'workspace:workspace_detail' workspace.url_hash %}">Назад к рабочей области</a>
+<!-- Быстрое создание задачи (если есть права) -->
+{% if can_create_tasks and quick_task_form %}
+    <hr style="margin: 40px 0;">
+    <h2>Быстрое создание задачи</h2>
+    <form method="post" action="{% url 'workspace:task_create' workspace.url_hash %}">
+        {% csrf_token %}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+                <label>Название:</label>
+                {{ quick_task_form.title }}
+            </div>
+            <div>
+                <label>Команда:</label>
+                {{ quick_task_form.team }}
+            </div>
+            <div>
+                <label>Исполнитель:</label>
+                {{ quick_task_form.assignee }}
+            </div>
+            <div>
+                <label>Приоритет:</label>
+                {{ quick_task_form.priority }}
+            </div>
+        </div>
+        <div style="margin-top: 10px;">
+            <label>Описание:</label>
+            {{ quick_task_form.description }}
+        </div>
+        <div style="margin-top: 10px;">
+            <button type="submit">Создать задачу</button>
+        </div>
+    </form>
+{% endif %}
 
 {% endblock %}
