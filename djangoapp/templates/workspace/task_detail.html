@@ -22,7 +22,11 @@
                 {{ task.reporter.username }}
                 {% if user_is_reporter %}<span style="color: blue;">(Вы)</span>{% endif %}
             </p>
-            <p><strong>Создана:</strong> {{ task.created_at|date:"d.m.Y H:i" }}</p>
+            <p><strong>Создана:</strong> 
+                <span class="utc-time" data-utc="{{ task.created_at.isoformat }}">
+                    {{ task.created_at|date:"d.m.Y H:i" }}
+                </span>
+            </p>
         </div>
         <div>
             <p><strong>Исполнитель:</strong> 
@@ -45,21 +49,26 @@
                 </span>
             </p>
             <p><strong>Дедлайн:</strong> 
-                <span id="task-deadline">
+                <span id="task-deadline" class="utc-time" data-utc="{% if task.deadline %}{{ task.deadline.isoformat }}{% endif %}">
                     {% if task.deadline %}
                         {{ task.deadline|date:"d.m.Y H:i" }}
-                        {% if is_overdue %}
-                            <span style="color: red;">(Просрочено на {{ overdue_days }} дней)</span>
-                        {% endif %}
                     {% else %}
                         Не установлен
+                    {% endif %}
+                </span>
+                <span id="overdue-text" class="overdue-text" style="color: red;">
+                    {% if is_overdue %}
+                        (Просрочено на {{ overdue_days }} дней)
                     {% endif %}
                 </span>
             </p>
             <p><strong>Обновлена:</strong> 
                 <span id="task-updated-info">
                     {% if task.updated_by %}
-                        {{ task.updated_by.username }} в {{ task.updated_at|date:"d.m.Y H:i" }}
+                        {{ task.updated_by.username }} в 
+                        <span class="utc-time" data-utc="{{ task.updated_at.isoformat }}">
+                            {{ task.updated_at|date:"d.m.Y H:i" }}
+                        </span>
                     {% else %}
                         Не обновлялась
                     {% endif %}
@@ -80,9 +89,9 @@
         </p>
         
         <p><strong>Описание:</strong></p>
-        <div id="task-description" style="padding: 10px; background-color: #f5f5f5; border-radius: 3px; min-height: 50px;">
+        <div id="task-description" style="padding: 10px; background-color: #f5f5f5; border-radius: 3px">
             {% if task.description %}
-                {{ task.description|linebreaks }}
+<p style="text-indent: 0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;">{{ task.description }}</p>
             {% else %}
                 <span style="color: #888;">Описание отсутствует</span>
             {% endif %}
@@ -121,7 +130,7 @@
             
             {% if is_special_editor %}
                 <p style="color: green; margin-top: 10px;">
-                    <strong>⚠️ Вы являетесь специальным редактором</strong><br>
+                    <strong>⭐️ Вы являетесь специальным редактором</strong><br>
                     У вас есть все права для редактирования задачи, независимо от настроек выше.
                 </p>
             {% endif %}
@@ -157,7 +166,8 @@
         <input type="hidden" id="original-team" value="{{ task.team.id|default_if_none:'' }}">
         <input type="hidden" id="original-assignee" value="{{ task.assignee.id|default_if_none:'' }}">
         <input type="hidden" id="original-visible" value="{% if task.visible %}on{% else %}off{% endif %}">
-        <input type="hidden" id="original-deadline" value="{% if task.deadline %}{{ task.deadline|date:'Y-m-d\TH:i' }}{% endif %}">
+        <!-- Храним дедлайн в UTC формате -->
+        <input type="hidden" id="original-deadline-utc" value="{% if task.deadline %}{{ task.deadline.isoformat }}{% endif %}">
 
         <h3>Основные параметры</h3>
         
@@ -208,17 +218,27 @@
             </div>
             
             <div>
-                <label><strong>Дедлайн:</strong></label>
+                <label><strong>Дедлайн (ваше местное время):</strong></label>
                 {% if can_edit_content or is_special_editor %}
-                    <input type="datetime-local" name="deadline" 
-                           value="{% if task.deadline %}{{ task.deadline|date:'Y-m-d\TH:i' }}{% endif %}" 
-                           style="width: 100%; padding: 8px;" id="edit-deadline"
-                           data-can-edit="true" data-original="{% if task.deadline %}{{ task.deadline|date:'Y-m-d\TH:i' }}{% endif %}">
+                    {% if task.deadline %}
+                        <input type="datetime-local" name="deadline" 
+                               value="" 
+                               style="width: 100%; padding: 8px;" id="edit-deadline"
+                               data-can-edit="true" data-original="">
+                    {% else %}
+                        <input type="datetime-local" name="deadline" 
+                               value="" 
+                               style="width: 100%; padding: 8px;" id="edit-deadline"
+                               data-can-edit="true" data-original="">
+                    {% endif %}
                 {% else %}
-                    <input type="hidden" name="deadline" value="{% if task.deadline %}{{ task.deadline|date:'Y-m-d\TH:i' }}{% endif %}">
+                    <input type="hidden" name="deadline" value="">
                     <p>{% if task.deadline %}{{ task.deadline|date:"d.m.Y H:i" }}{% else %}Не установлен{% endif %}</p>
                     <small style="color: #666;">(У вас нет прав для изменения)</small>
                 {% endif %}
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    Указывается в вашем локальном времени
+                </small>
             </div>
         </div>
         
@@ -362,7 +382,7 @@
                 Сохранить настройки прав
             </button>
             <span id="update-permissions-message" style="margin-left: 15px;"></span>
-        </div>
+</div>
     </form>
     {% endif %}
 </div>
@@ -447,6 +467,64 @@ function showMessage(message, type = 'info') {
     }, 5000);
 }
 
+// Функция для конвертации всех UTC времен в локальное время пользователя
+function convertAllTimes() {
+    // Находим все элементы с классом utc-time и data-utc атрибутом
+    const timeElements = document.querySelectorAll('.utc-time[data-utc]');
+    
+    timeElements.forEach(element => {
+        const utcString = element.getAttribute('data-utc');
+        if (utcString && utcString.trim() !== '') {
+            try {
+                const utcDate = new Date(utcString);
+                
+                // Форматируем дату в локальное время пользователя
+                const localDate = utcDate.toLocaleDateString('ru-RU', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
+                
+                const localTime = utcDate.toLocaleTimeString('ru-RU', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                });
+                
+                // Сохраняем оригинальный текст для восстановления при необходимости
+                if (!element.dataset.originalText) {
+                    element.dataset.originalText = element.textContent;
+                }
+                
+                // Обновляем текст элемента
+                element.textContent = `${localDate} ${localTime}`;
+                
+                // Добавляем тултип с информацией о UTC времени
+                element.title = `UTC: ${utcString.replace('T', ' ').slice(0, 16)}`;
+                
+            } catch (error) {
+                console.error('Ошибка конвертации времени:', error, 'UTC строка:', utcString);
+            }
+        }
+    });
+    
+    // Также обновляем поле дедлайна в форме редактирования
+    const deadlineInput = document.getElementById('edit-deadline');
+    if (deadlineInput) {
+        const originalUTC = document.getElementById('original-deadline-utc')?.value;
+        if (originalUTC && originalUTC.trim() !== '') {
+            try {
+                const utcDate = new Date(originalUTC);
+                // Преобразуем UTC в локальное время для input[type="datetime-local"]
+                const localDate = new Date(utcDate.getTime() - (utcDate.getTimezoneOffset() * 60000));
+                deadlineInput.value = localDate.toISOString().slice(0, 16);
+            } catch (error) {
+                console.error('Ошибка конвертации дедлайна:', error);
+            }
+        }
+    }
+}
+
 // Функция для получения значения поля в зависимости от его типа
 function getFieldValue(element) {
     if (!element) return '';
@@ -459,6 +537,53 @@ function getFieldValue(element) {
         return element.value;
     } else {
         return element.value;
+    }
+}
+
+// Функция для преобразования локального времени в строку для отправки
+function localDateTimeToLocalString(localDateTimeString) {
+    if (!localDateTimeString) return '';
+    // Добавляем секунды для корректного парсинга Django
+    return localDateTimeString + ':00';
+}
+
+// Функция для преобразования локального времени в UTC
+function localDateTimeToUTC(localDateTimeString) {
+
+    if (!localDateTimeString) return '';
+    
+    try {
+        // Браузер интерпретирует строку как локальное время
+        const localDate = new Date(localDateTimeString); // Добавляем Z чтобы избежать проблем
+        
+        // Получаем время в UTC
+        const utcYear = localDate.getUTCFullYear();
+        const utcMonth = String(localDate.getUTCMonth() + 1).padStart(2, '0');
+        const utcDay = String(localDate.getUTCDate()).padStart(2, '0');
+        const utcHours = String(localDate.getUTCHours()).padStart(2, '0');
+        const utcMinutes = String(localDate.getUTCMinutes()).padStart(2, '0');
+        
+        // Формат: YYYY-MM-DD HH:MM:SS (для Django)
+        return `${utcYear}-${utcMonth}-${utcDay} ${utcHours}:${utcMinutes}:00`;
+    } catch (error) {
+        console.error('Ошибка конвертации времени в UTC:', error);
+        return '';
+    }
+}
+
+// Функция для преобразования UTC в локальное время
+function utcToLocalDateTime(utcString) {
+    if (!utcString) return '';
+    
+    try {
+        const utcDate = new Date(utcString + 'Z'); // Добавляем Z для указания UTC
+        
+        // Преобразуем UTC в локальное время для input
+        const localDate = new Date(utcDate.getTime() - (utcDate.getTimezoneOffset() * 60000));
+        return localDate.toISOString().slice(0, 16);
+    } catch (error) {
+        console.error('Ошибка конвертации UTC в локальное время:', error);
+        return '';
     }
 }
 
@@ -481,14 +606,14 @@ function updateOriginalValues(taskData) {
         document.getElementById('original-visible').value = taskData.visible ? 'on' : 'off';
     }
     
+    // Обновляем дедлайн в UTC формате
     if (taskData.deadline) {
-        const deadlineDate = new Date(taskData.deadline);
-        if (document.getElementById('original-deadline')) {
-            document.getElementById('original-deadline').value = deadlineDate.toISOString().slice(0, 16);
+        if (document.getElementById('original-deadline-utc')) {
+            document.getElementById('original-deadline-utc').value = taskData.deadline;
         }
     } else {
-        if (document.getElementById('original-deadline')) {
-            document.getElementById('original-deadline').value = '';
+        if (document.getElementById('original-deadline-utc')) {
+            document.getElementById('original-deadline-utc').value = '';
         }
     }
     
@@ -526,72 +651,108 @@ function updateTaskInfo(data) {
     
     // Обновляем дедлайн
     const deadlineElement = document.getElementById('task-deadline');
-    deadlineElement.innerHTML = '';
-    if (data.deadline_display && data.deadline_display !== 'Не установлен') {
-        deadlineElement.textContent = data.deadline_display;
-        if (data.is_overdue) {
-            const overdueSpan = document.createElement('span');
-            overdueSpan.style.color = 'red';
-            overdueSpan.textContent = ' (Просрочено)';
-            deadlineElement.appendChild(overdueSpan);
+    if (deadlineElement) {
+        deadlineElement.innerHTML = '';
+        
+        if (data.deadline) {
+            // Обновляем data-utc атрибут
+            deadlineElement.setAttribute('data-utc', data.deadline);
+            
+            // Временно отображаем время в формате UTC
+            const utcDate = new Date(data.deadline);
+            const utcDateStr = utcDate.toISOString().slice(0, 16).replace('T', ' ');
+            deadlineElement.textContent = utcDateStr;
+
+            if (data.overdue_days) {
+                const overdueSpan = document.getElementById('overdue-text');
+                overdueSpan.innerHTML = '(Просрочено на '+data.overdue_days+' дней)';
+            } else {
+                const overdueSpan = document.getElementById('overdue-text');
+                overdueSpan.innerHTML = '';
+            }
+        } else {
+            deadlineElement.textContent = 'Не установлен';
+            deadlineElement.removeAttribute('data-utc');
         }
-    } else {
-        deadlineElement.textContent = 'Не установлен';
     }
     
     // Обновляем исполнителя
     const assigneeElement = document.getElementById('task-assignee');
-    assigneeElement.innerHTML = '';
-    if (data.assignee) {
-        assigneeElement.textContent = data.assignee.username;
-        if (data.assignee.username === '{{ request.user.username }}') {
-            const youSpan = document.createElement('span');
-            youSpan.style.color = 'blue';
-            youSpan.textContent = ' (Вы)';
-            assigneeElement.appendChild(youSpan);
+    if (assigneeElement) {
+        assigneeElement.innerHTML = '';
+        if (data.assignee) {
+            assigneeElement.textContent = data.assignee.username;
+            if (data.assignee.username === '{{ request.user.username }}') {
+                const youSpan = document.createElement('span');
+                youSpan.style.color = 'blue';
+                youSpan.textContent = ' (Вы)';
+                assigneeElement.appendChild(youSpan);
+            }
+        } else {
+            assigneeElement.textContent = 'Не назначен';
         }
-    } else {
-        assigneeElement.textContent = 'Не назначен';
     }
     
     // Обновляем команду
     const teamElement = document.getElementById('task-team');
-    if (data.team) {
-        teamElement.textContent = data.team.name;
-    } else {
-        teamElement.textContent = 'Без команды';
+    if (teamElement) {
+        if (data.team) {
+            teamElement.textContent = data.team.name;
+        } else {
+            teamElement.textContent = 'Без команды';
+        }
     }
     
     // Обновляем описание
     const descriptionElement = document.getElementById('task-description');
-    descriptionElement.innerHTML = '';
-    if (data.description) {
-        descriptionElement.innerHTML = data.description.replace(/\n/g, '<br>');
-    } else {
-        descriptionElement.innerHTML = '<span style="color: #888;">Описание отсутствует</span>';
+    if (descriptionElement) {
+        descriptionElement.innerHTML = '';
+        if (data.description) {
+            descriptionElement.innerHTML = '<p style="text-indent: 0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;">'+data.description+'</p>';
+        } else {
+            descriptionElement.innerHTML = '<span style="color: #888;">Описание отсутствует</span>';
+        }
     }
     
     // Обновляем видимость
     const visibilityElement = document.getElementById('task-visibility');
-    visibilityElement.innerHTML = '';
-    if (data.visible) {
-        const visibleSpan = document.createElement('span');
-        visibleSpan.style.color = 'green';
-        visibleSpan.textContent = 'Открытая задача';
-        visibilityElement.appendChild(visibleSpan);
-    } else {
-        const hiddenSpan = document.createElement('span');
-        hiddenSpan.style.color = 'orange';
-        hiddenSpan.textContent = 'Скрытая задача';
-        visibilityElement.appendChild(hiddenSpan);
+    if (visibilityElement) {
+        visibilityElement.innerHTML = '';
+        if (data.visible) {
+            const visibleSpan = document.createElement('span');
+            visibleSpan.style.color = 'green';
+            visibleSpan.textContent = 'Открытая задача';
+            visibilityElement.appendChild(visibleSpan);
+        } else {
+            const hiddenSpan = document.createElement('span');
+            hiddenSpan.style.color = 'orange';
+            hiddenSpan.textContent = 'Скрытая задача';
+            visibilityElement.appendChild(hiddenSpan);
+        }
     }
     
     // Обновляем информацию об обновлении
     const updatedElement = document.getElementById('task-updated-info');
-    if (data.updated_by) {
-        const now = new Date();
-        const formattedDate = now.toLocaleDateString('ru-RU') + ' ' + now.toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'});
-        updatedElement.textContent = `${data.updated_by} в ${formattedDate}`;
+    if (updatedElement && data.updated_by) {
+        // Находим span с временем обновления
+        const updatedTimeSpan = updatedElement.querySelector('.utc-time');
+        if (updatedTimeSpan && data.updated_at) {
+            updatedTimeSpan.setAttribute('data-utc', data.updated_at);
+            // Временно отображаем UTC время
+            const utcDate = new Date(data.updated_at);
+            const utcDateStr = utcDate.toISOString().slice(0, 16).replace('T', ' ');
+            updatedTimeSpan.textContent = utcDateStr;
+        }
+        updatedElement.innerHTML = `${data.updated_by} в ${updatedTimeSpan ? updatedTimeSpan.outerHTML : ''}`;
+    }
+    
+    // Обновляем время создания
+    const createdElement = document.querySelector('[data-utc].utc-time');
+    if (createdElement && data.created_at) {
+        createdElement.setAttribute('data-utc', data.created_at);
+        const utcDate = new Date(data.created_at);
+        const utcDateStr = utcDate.toISOString().slice(0, 16).replace('T', ' ');
+        createdElement.textContent = utcDateStr;
     }
     
     // Обновляем значения в форме редактирования
@@ -604,14 +765,19 @@ function updateTaskInfo(data) {
     const editPriority = document.getElementById('edit-priority');
     if (editPriority) editPriority.value = data.priority;
     
+    // Обновляем поле дедлайна в форме
     const editDeadline = document.getElementById('edit-deadline');
-    if (editDeadline) {
-        if (data.deadline) {
-            const deadlineDate = new Date(data.deadline);
-            editDeadline.value = deadlineDate.toISOString().slice(0, 16);
-        } else {
+    if (editDeadline && data.deadline) {
+        try {
+            const utcDate = new Date(data.deadline);
+            const localDate = new Date(utcDate.getTime() - (utcDate.getTimezoneOffset() * 60000));
+            editDeadline.value = localDate.toISOString().slice(0, 16);
+        } catch (error) {
+            console.error('Ошибка обновления дедлайна:', error);
             editDeadline.value = '';
         }
+    } else if (editDeadline) {
+        editDeadline.value = '';
     }
     
     const editDescription = document.getElementById('edit-description');
@@ -636,6 +802,9 @@ function updateTaskInfo(data) {
     
     // Обновляем исходные значения
     updateOriginalValues(data);
+    
+    // После обновления данных, снова конвертируем время в локальное
+    setTimeout(convertAllTimes, 100);
 }
 
 // Обновление прав доступа на странице
@@ -662,6 +831,9 @@ function updatePermissions(data) {
 
 // Обработка формы обновления задачи
 document.addEventListener('DOMContentLoaded', function() {
+    // При загрузке страницы конвертируем все времена из UTC в локальное
+    convertAllTimes();
+    
     const updateTaskForm = document.getElementById('update-task-form');
     if (updateTaskForm) {
         updateTaskForm.addEventListener('submit', function(e) {
@@ -689,16 +861,84 @@ document.addEventListener('DOMContentLoaded', function() {
                 const element = document.getElementById(field.id);
                 if (element) {
                     const currentValue = getFieldValue(element);
-                    const originalElement = document.getElementById(`original-${field.name}`);
-                    const originalValue = originalElement ? originalElement.value : '';
                     
-                    // Если поле можно редактировать и значение изменилось
-                    if (field.canEdit && currentValue !== originalValue) {
-                        formData.append(field.name, currentValue);
-                        hasChanges = true;
-                    } else if (!field.canEdit && originalElement) {
-                        // Если нельзя редактировать, отправляем исходное значение
-                        formData.append(field.name, originalValue);
+                    // Для дедлайна обрабатываем отдельно
+                    if (field.name === 'deadline') {
+                        const originalUTC = document.getElementById('original-deadline-utc')?.value;
+                        
+                        // Нормализуем оригинальное значение для сравнения
+                        let normalizedOriginal = '';
+                        if (originalUTC && originalUTC.trim() !== '') {
+                            try {
+                                // Конвертируем ISO строку в формат YYYY-MM-DD HH:MM:SS
+                                const utcDate = new Date(originalUTC);
+                                const year = utcDate.getUTCFullYear();
+                                const month = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
+                                const day = String(utcDate.getUTCDate()).padStart(2, '0');
+                                const hours = String(utcDate.getUTCHours()).padStart(2, '0');
+                                const minutes = String(utcDate.getUTCMinutes()).padStart(2, '0');
+                                normalizedOriginal = `${year}-${month}-${day} ${hours}:${minutes}:00`;
+                            } catch (error) {
+                                console.error('Ошибка нормализации оригинального времени:', error);
+                            }
+                        }
+                        
+                        if (field.canEdit) {
+                            // Если пользователь может редактировать
+                            if (currentValue) {
+                                // Преобразуем локальное время в UTC строку для отправки
+                                const utcString = localDateTimeToUTC(localDateTimeToLocalString(currentValue));
+                                
+                                // Сравниваем с нормализованным оригиналом
+                                if (utcString !== normalizedOriginal) {
+                                    formData.append(field.name, utcString);
+                                    hasChanges = true;
+                                    console.log('Дедлайн изменился:', {
+                                        старое: normalizedOriginal,
+                                        новое: utcString
+                                    });
+                                } else {
+                                    // Если значение не изменилось, отправляем оригинальное
+                                    formData.append(field.name, originalUTC ? normalizedOriginal : '');
+                                    console.log('Дедлайн не изменился');
+                                }
+                            } else if (originalUTC && originalUTC.trim() !== '' && currentValue === '') {
+                                // Если дедлайн удален (пустая строка при наличии старого значения)
+                                formData.append(field.name, '');
+                                hasChanges = true;
+                                console.log('Дедлайн удален');
+                            } else if (!originalUTC && !currentValue) {
+                                // Если дедлайна не было и не установлен - ничего не меняется
+                                formData.append(field.name, '');
+                                console.log('Дедлайн не был установлен и не установлен');
+                            } else if (originalUTC && currentValue === '') {
+                                // Дедлайн удален
+                                formData.append(field.name, '');
+                                hasChanges = true;
+                                console.log('Дедлайн удален');
+                            }
+                        } else if (originalUTC && originalUTC.trim() !== '') {
+                            // Если нельзя редактировать, отправляем оригинальное значение
+                            formData.append(field.name, normalizedOriginal);
+                            console.log('Дедлайн нельзя редактировать, отправляем оригинал');
+                        }
+                    } else {
+                        // Для остальных полей
+                        const originalElement = document.getElementById(`original-${field.name}`);
+                        const originalValue = originalElement ? originalElement.value : '';
+                        
+                        // Если поле можно редактировать и значение изменилось
+                        if (field.canEdit && currentValue !== originalValue) {
+                            formData.append(field.name, currentValue);
+                            hasChanges = true;
+                            console.log(`Поле ${field.name} изменилось:`, {
+                                старое: originalValue,
+                                новое: currentValue
+                            });
+                        } else if (!field.canEdit && originalElement) {
+                            // Если нельзя редактировать, отправляем исходное значение
+                            formData.append(field.name, originalValue);
+                        }
                     }
                 }
             });

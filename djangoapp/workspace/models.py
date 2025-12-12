@@ -591,10 +591,6 @@ class Task(models.Model):
             if not self.workspace.has_access(self.assignee):
                 errors['assignee'] = 'Исполнитель должен быть участником рабочей области'
 
-        # Проверяем дедлайн
-        if self.deadline and self.deadline < timezone.now():
-            errors['deadline'] = 'Дедлайн не может быть в прошлом'
-
         if errors:
             raise ValidationError(errors)
 

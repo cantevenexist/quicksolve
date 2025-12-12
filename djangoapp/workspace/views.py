@@ -989,7 +989,7 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
                         update_data[field] = new_value
                         has_changes = True
             
-            # Особенная обработка дедлайна
+            # Особенная обработка дедлайна с UTC (упрощенная версия)
             if 'deadline' in request.POST:
                 if not task.can_user_edit_content(request.user):
                     # Пропускаем, если нет прав
@@ -1001,16 +1001,31 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
                     # Проверяем, изменился ли дедлайн
                     if deadline_str:
                         try:
+                            # Парсим дату из строки
                             from django.utils.dateparse import parse_datetime
-                            new_deadline = parse_datetime(deadline_str)
-                            if new_deadline:
-                                if not current_deadline or new_deadline != current_deadline:
-                                    update_data['deadline'] = new_deadline
-                                    has_changes = True
+                            new_deadline_naive = parse_datetime(deadline_str)
+                            
+                            if new_deadline_naive:
+                                # Используем timezone для преобразования
+                                if new_deadline_naive.tzinfo is None:
+                                    # Преобразуем наивное время в aware с текущей таймзоной
+                                    new_deadline_aware = timezone.make_aware(
+                                        new_deadline_naive, 
+                                        timezone.get_current_timezone()
+                                    )
+                                    # Сохраняем в базе (Django автоматически сохраняет в UTC)
+                                    update_data['deadline'] = new_deadline_aware
+                                    if new_deadline_aware != current_deadline: has_changes = True
+
+                                else:
+                                    # Уже aware время
+                                    update_data['deadline'] = new_deadline_naive
+                                    if new_deadline_naive != current_deadline: has_changes = True
+
                             else:
                                 validation_errors.append('Некорректный формат даты для дедлайна')
-                        except Exception:
-                            validation_errors.append('Некорректный формат даты для дедлайна')
+                        except Exception as e:
+                            validation_errors.append(f'Некорректный формат даты для дедлайна: {str(e)}')
                     else:
                         # Пустая строка означает удаление дедлайна
                         if current_deadline is not None:
@@ -1115,7 +1130,12 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
                 # Выполняем полную валидацию перед сохранением
                 task.full_clean()
                 task.save()
-                
+
+                # Добавляем информацию о просроченности задачи
+                if task.deadline and task.deadline < timezone.now() and task.status != 'done':
+                    overdue_days = str((timezone.now() - task.deadline).days)
+                else: overdue_days = None
+
                 # Возвращаем обновленные данные задачи
                 return JsonResponse({
                     'success': True,
@@ -1141,7 +1161,8 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
                         'visible': task.visible,
                         'updated_at': task.updated_at.isoformat(),
                         'updated_by': task.updated_by.username if task.updated_by else None,
-                        'is_overdue': task.deadline and task.deadline < timezone.now() and task.status != 'done'
+                        'is_overdue': task.deadline and task.deadline < timezone.now() and task.status != 'done',
+                        'overdue_days': overdue_days
                     }
                 })
                 
