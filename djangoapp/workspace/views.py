@@ -1705,6 +1705,7 @@ class TeamInviteMemberView(LoginRequiredMixin, View):
             'success': True,
             'added_count': len(added_users),
             'added_users': added_users,
+            'members_count': team.members.count(),
             'errors': errors
         })
     
@@ -1832,14 +1833,29 @@ class TeamLeaveView(LoginRequiredMixin, View):
                     'error': 'Нельзя покинуть команду, потому что вы являетесь её лидером, сначала назначьте другого лидера'
                 })
             
-            # Удаляем пользователя из команды
-            membership.delete()
-            
-            # Проверяем, остался ли пользователь в команде (для кнопки)
-            is_still_member = TeamMembership.objects.filter(
-                team=team,
-                user=request.user
-            ).exists()
+            # Выполняем все операции в транзакции
+            with transaction.atomic():
+                # 1. Получаем задачи, где пользователь назначен исполнителем и задача назначена на эту команду
+                tasks_to_update = Task.objects.filter(
+                    team=team,
+                    assignee=request.user
+                )
+
+                # 2. Убираем пользователя из исполнителей задач этой команды
+                tasks_to_update.update(
+                    assignee=None,
+                    updated_at=timezone.now(),
+                    updated_by=request.user
+                )
+                
+                # 3. Удаляем пользователя из команды
+                membership.delete()
+                
+                # 4. Проверяем, остался ли пользователь в команде (для кнопки)
+                is_still_member = TeamMembership.objects.filter(
+                    team=team,
+                    user=request.user
+                ).exists()
             
             return JsonResponse({
                 'success': True,
@@ -2177,77 +2193,147 @@ class TeamKickMemberView(LoginRequiredMixin, View):
         
         removed_users = []
         errors = []
+        total_tasks_updated = 0
         
-        for user_id in user_ids:
-            try:
-                user_to_remove = User.objects.get(id=user_id)
-                
-                # Проверяем, что пользователь действительно в команде
-                membership = TeamMembership.objects.filter(
-                    team=team, 
-                    user=user_to_remove
-                ).first()
-                
-                if not membership:
-                    errors.append(f"Пользователь {user_to_remove.username} не состоит в команде")
+        # Выполняем все операции в транзакции
+        with transaction.atomic():
+            for user_id in user_ids:
+                try:
+                    user_to_remove = User.objects.get(id=user_id)
+                    
+                    # Проверяем, что пользователь действительно в команде
+                    membership = TeamMembership.objects.filter(
+                        team=team, 
+                        user=user_to_remove
+                    ).first()
+                    
+                    if not membership:
+                        errors.append(f"Пользователь {user_to_remove.username} не состоит в команде")
+                        continue
+                    
+                    # Проверяем права доступа для удаления
+                    removal_error = self.check_removal_permission(request.user, membership, user_to_remove, team)
+                    if removal_error:
+                        errors.append(removal_error)
+                        continue
+                    
+                    # Получаем задачи, где пользователь назначен исполнителем в этой команде
+                    user_tasks = Task.objects.filter(
+                        team=team,
+                        assignee=user_to_remove
+                    )
+                    
+                    # Запоминаем количество задач для этого пользователя
+                    user_tasks_count = user_tasks.count()
+                    total_tasks_updated += user_tasks_count
+                    
+                    # Убираем пользователя из исполнителей задач
+                    user_tasks.update(
+                        assignee=None,
+                        updated_at=timezone.now(),
+                        updated_by=request.user
+                    )
+                    
+                    # Удаляем пользователя из команды
+                    membership.delete()
+                    
+                    removed_users.append({
+                        'id': user_to_remove.id,
+                        'username': user_to_remove.username,
+                        'email': user_to_remove.email,
+                        'tasks_updated': user_tasks_count
+                    })
+                    
+                    # Создаем уведомление для удаленного пользователя
+                    self.create_team_leave_notification(user_to_remove, team, request, user_tasks_count)
+                    
+                except User.DoesNotExist:
+                    errors.append(f"Пользователь с ID {user_id} не найден")
                     continue
-                
-                # Проверяем права доступа для удаления
-                removal_error = self.check_removal_permission(request.user, membership, user_to_remove)
-                if removal_error:
-                    errors.append(removal_error)
-                    continue
-                
-                # Удаляем пользователя из команды
-                membership.delete()
-                
-                removed_users.append({
-                    'id': user_to_remove.id,
-                    'username': user_to_remove.username,
-                    'email': user_to_remove.email
-                })
-                
-                # Создаем уведомление для удаленного пользователя
-                self.create_team_leave_notification(user_to_remove, team, request)
-                
-            except User.DoesNotExist:
-                errors.append(f"Пользователь с ID {user_id} не найден")
-                continue
+            
+            # Создаем уведомление для удаляющего
+            if removed_users:
+                self.create_kicker_notification(request.user, removed_users, team, total_tasks_updated)
         
-        # Создаем уведомление для удаляющего
-        if removed_users:
-            self.create_kicker_notification(request.user, removed_users, team)
+        if errors and not removed_users:
+            return JsonResponse({
+                'success': False,
+                'error': 'Не удалось удалить пользователей',
+                'errors': errors
+            })
+        
+        # Получаем обновленное количество участников
+        members_count = team.members.count()
         
         return JsonResponse({
             'success': True,
             'removed_count': len(removed_users),
             'removed_users': removed_users,
-            'errors': errors
+            'members_count': members_count,
+            'tasks_updated': {
+                'total': total_tasks_updated,
+                'message': f'Пользователи сняты с исполнения {total_tasks_updated} задач'
+            },
+            'errors': errors if errors else None
         })
     
-    def check_removal_permission(self, current_user, target_membership, target_user):
+    def check_removal_permission(self, current_user, target_membership, target_user, team):
         """Проверяет права доступа для удаления пользователя"""
-        current_membership = TeamMembership.objects.get(
-            team=target_membership.team,
-            user=current_user
-        )
-        
-        # Лидер может удалить кого угодно (кроме себя)
-        if current_membership.role == 'leader':
-            return None
-        
-        # Администратор может удалять только обычных участников
-        if current_membership.role == 'admin':
-            if target_membership.role == 'leader':
-                return f"Нельзя удалить лидера команды {target_user.username}"
-            elif target_membership.role == 'admin':
-                return f"Нельзя удалить другого администратора {target_user.username}"
-            else:
+        try:
+            current_membership = TeamMembership.objects.get(
+                team=target_membership.team,
+                user=current_user
+            )
+            
+            # Лидер может удалить кого угодно (кроме себя)
+            if current_membership.role == 'leader':
+                # Проверяем, что пользователь не пытается удалить единственного лидера
+                if target_membership.role == 'leader':
+                    # Проверяем, есть ли другие лидеры в команде
+                    other_leaders = TeamMembership.objects.filter(
+                        team=team,
+                        role='leader'
+                    ).exclude(user=target_user).exists()
+                    
+                    if not other_leaders:
+                        return f"Нельзя удалить единственного лидера команды {target_user.username}"
                 return None
-        
-        return "Недостаточно прав для удаления"
+            
+            # Администратор может удалять только обычных участников
+            if current_membership.role == 'admin':
+                if target_membership.role == 'leader':
+                    return f"Нельзя удалить лидера команды {target_user.username}"
+                elif target_membership.role == 'admin':
+                    return f"Нельзя удалить другого администратора {target_user.username}"
+                else:
+                    return None
+            
+            return "Недостаточно прав для удаления"
+            
+        except TeamMembership.DoesNotExist:
+            # Проверяем, является ли пользователь владельцем workspace
+            workspace_membership = WorkspaceMembership.objects.filter(
+                workspace=team.workspace,
+                user=current_user,
+                role='owner'
+            ).first()
+            
+            if workspace_membership:
+                # Владелец workspace может удалить кого угодно
+                if target_membership.role == 'leader':
+                    # Проверяем, что пользователь не пытается удалить единственного лидера
+                    other_leaders = TeamMembership.objects.filter(
+                        team=team,
+                        role='leader'
+                    ).exclude(user=target_user).exists()
+                    
+                    if not other_leaders:
+                        return f"Нельзя удалить единственного лидера команды {target_user.username}"
+                return None
+            
+            return "Недостаточно прав для удаления"
     
-    def create_team_leave_notification(self, user, team, request):
+    def create_team_leave_notification(self, user, team, request, tasks_updated_count):
         """Создает уведомление об удалении из команды"""
         workspace_url = request.build_absolute_uri(
             reverse('workspace:workspace_detail', kwargs={
@@ -2257,6 +2343,9 @@ class TeamKickMemberView(LoginRequiredMixin, View):
         
         message = f'Вас удалили из команды "{team.name}" рабочей области "{team.workspace.name}"'
         
+        if tasks_updated_count > 0:
+            message += f'\nВы были сняты с исполнения {tasks_updated_count} задач этой команды'
+        
         Notification.objects.create(
             user=user,
             message=message,
@@ -2264,13 +2353,19 @@ class TeamKickMemberView(LoginRequiredMixin, View):
             related_url=workspace_url
         )
     
-    def create_kicker_notification(self, kicker, removed_users, team):
+    def create_kicker_notification(self, kicker, removed_users, team, total_tasks_updated):
         """Создает уведомление для пользователя, который удалил участников"""
         if len(removed_users) == 1:
             removed_user = removed_users[0]
             message = f'Вы удалили пользователя {removed_user["username"]} из команды "{team.name}"'
+            
+            if removed_user['tasks_updated'] > 0:
+                message += f'\nПользователь снят с исполнения {removed_user["tasks_updated"]} задач'
         else:
             message = f'Вы удалили {len(removed_users)} пользователей из команды "{team.name}"'
+            
+            if total_tasks_updated > 0:
+                message += f'\nПользователи сняты с исполнения {total_tasks_updated} задач'
         
         Notification.objects.create(
             user=kicker,

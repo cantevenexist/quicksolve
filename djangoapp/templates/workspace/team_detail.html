@@ -1256,6 +1256,12 @@ function addSelectedUsers() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            // Обновляем счетчик участников
+            const membersCount = document.getElementById('membersCount');
+            if (membersCount) {
+                const count = data.members_count;
+                membersCount.textContent = `${count} участник${count === 1 ? '' : count > 1 && count < 5 ? 'а' : 'ов'}`;
+            }
             // Показываем успешное сообщение
             let successMessage = `Успешно добавлено пользователей: ${data.added_count}`;
             if (data.added_users && data.added_users.length > 0) {
@@ -1417,6 +1423,12 @@ function kickMembers() {
         closeConfirmKickModal();
         
         if (data.success) {
+            // Обновляем счетчик участников
+            const membersCount = document.getElementById('membersCount');
+            if (membersCount) {
+                const count = data.members_count;
+                membersCount.textContent = `${count} участник${count === 1 ? '' : count > 1 && count < 5 ? 'а' : 'ов'}`;
+            }
             // Показываем успешное сообщение
             let successMessage = `Успешно удалено пользователей: ${data.removed_count}`;
             if (data.removed_users && data.removed_users.length > 0) {
