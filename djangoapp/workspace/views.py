@@ -246,6 +246,7 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
         context['can_delete_tasks_in_workspace'] = workspace_access.has_permission(self.request.user, 'can_delete_tasks')
 
         # Права для команды
+        context['is_member'] = team.members.filter(id=self.request.user.id).exists()
         context['can_manage_access'] = team_access.has_permission(self.request.user, 'can_manage_access')
         context['can_edit_team'] = team_access.has_permission(self.request.user, 'can_edit_team')
         context['can_invite_users'] = team_access.has_permission(self.request.user, 'can_invite_users')
@@ -1739,6 +1740,280 @@ class TeamInviteMemberView(LoginRequiredMixin, View):
             level='info'
         )
 
+
+class TeamJoinView(LoginRequiredMixin, View):
+    """Представление для присоединения к команде"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        workspace_url_hash = kwargs.get('workspace_url_hash')
+        team_url_hash = kwargs.get('team_url_hash')
+        
+        try:
+            # Получаем команду
+            team = get_object_or_404(
+                Team,
+                url_hash=team_url_hash,
+                workspace__url_hash=workspace_url_hash
+            )
+            
+            # Проверяем, может ли пользователь присоединиться
+            team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+            
+            if not team_access.is_team_visible_to_user(request.user):
+                return JsonResponse({
+                    'success': False, 
+                    'error': 'У вас нет доступа к этой команде'
+                })
+            
+            # Проверяем, не является ли пользователь уже участником
+            if TeamMembership.objects.filter(team=team, user=request.user).exists():
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Вы уже являетесь участником этой команды'
+                })
+            
+            # Присоединяем пользователя к команде с ролью "member"
+            TeamMembership.objects.create(
+                team=team,
+                user=request.user,
+                role='member'
+            )
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Вы успешно присоединились к команде',
+                'is_member': True,
+                'members_count': team.members.count()
+            })
+            
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            })
+
+class TeamLeaveView(LoginRequiredMixin, View):
+    """Представление для выхода из команды"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        workspace_url_hash = kwargs.get('workspace_url_hash')
+        team_url_hash = kwargs.get('team_url_hash')
+        
+        try:
+            # Получаем команду
+            team = get_object_or_404(
+                Team,
+                url_hash=team_url_hash,
+                workspace__url_hash=workspace_url_hash
+            )
+            
+            # Проверяем, является ли пользователь участником
+            membership = TeamMembership.objects.filter(
+                team=team,
+                user=request.user
+            ).first()
+            
+            if not membership:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Вы не являетесь участником этой команды'
+                })
+            
+            # Проверяем, является ли пользователь лидером
+            if membership.role == 'leader':
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Нельзя покинуть команду, потому что вы являетесь её лидером, сначала назначьте другого лидера'
+                })
+            
+            # Удаляем пользователя из команды
+            membership.delete()
+            
+            # Проверяем, остался ли пользователь в команде (для кнопки)
+            is_still_member = TeamMembership.objects.filter(
+                team=team,
+                user=request.user
+            ).exists()
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Вы успешно покинули команду',
+                'is_member': is_still_member,
+                'members_count': team.members.count()
+            })
+            
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            })
+
+from django.db import transaction
+from django.contrib.auth import authenticate
+
+class TeamTransferLeaderRoleView(LoginRequiredMixin, View):
+    """Представление для передачи роли лидера команды с проверкой пароля"""
+    
+    def post(self, request, *args, **kwargs):
+        # Проверяем, что это AJAX запрос
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'success': False, 
+                'error': 'Неверный тип запроса. Требуется AJAX.'
+            })
+        
+        workspace_url_hash = kwargs.get('workspace_url_hash')
+        team_url_hash = kwargs.get('team_url_hash')
+        
+        try:
+            # Получаем команду
+            team = get_object_or_404(
+                Team,
+                url_hash=team_url_hash,
+                workspace__url_hash=workspace_url_hash
+            )
+            
+            # Получаем данные из запроса
+            new_leader_id = request.POST.get('new_leader_id')
+            password = request.POST.get('password')
+            
+            # Валидация данных
+            if not new_leader_id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Не выбран новый лидер команды'
+                })
+            
+            if not password:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Для подтверждения действия необходимо ввести ваш пароль'
+                })
+            
+            # Проверяем права текущего пользователя
+            team_membership = TeamMembership.objects.filter(
+                team=team,
+                user=request.user
+            ).first()
+            
+            workspace_membership = WorkspaceMembership.objects.filter(
+                workspace=team.workspace,
+                user=request.user
+            ).first()
+            
+            # Определяем, может ли пользователь передать лидера
+            is_team_leader = team_membership and team_membership.role == 'leader'
+            is_workspace_owner = workspace_membership and workspace_membership.role == 'owner'
+            
+            if not (is_team_leader or is_workspace_owner):
+                return JsonResponse({
+                    'success': False,
+                    'error': 'У вас нет прав для передачи роли лидера команды'
+                })
+            
+            # Проверяем пароль текущего пользователя
+            user = authenticate(
+                username=request.user.username,
+                password=password
+            )
+            
+            if not user:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Неверный пароль. Проверьте правильность ввода.'
+                })
+            
+            # Проверяем, что новый лидер существует в команде
+            try:
+                new_leader_membership = TeamMembership.objects.select_related('user').get(
+                    team=team,
+                    user_id=new_leader_id
+                )
+            except TeamMembership.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Выбранный пользователь не является участником команды'
+                })
+            
+            # Проверяем, что новый лидер не является текущим пользователем
+            if new_leader_membership.user_id == request.user.id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Вы уже являетесь лидером этой команды'
+                })
+            
+            # Проверяем, что пользователь не передает лидера самому себе
+            if is_team_leader and new_leader_membership.user_id == request.user.id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Вы не можете передать лидерство самому себе'
+                })
+            
+            # Выполняем передачу лидера в транзакции
+            with transaction.atomic():
+                # Если текущий пользователь - лидер команды, меняем его роль на администратора
+                if is_team_leader:
+                    team_membership.role = 'member'
+                    team_membership.save()
+                
+                # Назначаем нового лидера
+                new_leader_membership.role = 'leader'
+                new_leader_membership.save()
+            
+            # Получаем обновленные данные для ответа
+            updated_current_membership = TeamMembership.objects.get(
+                team=team,
+                user=request.user
+            )
+            
+            # Формируем успешный ответ
+            response_data = {
+                'success': True,
+                'message': f'Роль лидера команды успешно передана пользователю {new_leader_membership.user.username}',
+                'data': {
+                    'new_leader': {
+                        'id': new_leader_membership.user.id,
+                        'username': new_leader_membership.user.username,
+                        'first_name': new_leader_membership.user.first_name,
+                        'last_name': new_leader_membership.user.last_name,
+                        'full_name': f"{new_leader_membership.user.first_name} {new_leader_membership.user.last_name}".strip() or new_leader_membership.user.username,
+                        'role': 'leader'
+                    },
+                    'current_user': {
+                        'id': request.user.id,
+                        'username': request.user.username,
+                        'role': updated_current_membership.role,
+                        'role_display': updated_current_membership.get_role_display()
+                    },
+                    'team': {
+                        'id': team.id,
+                        'name': team.name,
+                        'url_hash': team.url_hash
+                    },
+                    'timestamp': timezone.now().isoformat()
+                }
+            }
+            
+            return JsonResponse(response_data)
+            
+        except Exception as e:
+            # Логируем ошибку для отладки
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Ошибка при передаче лидера команды: {str(e)}", exc_info=True)
+            
+            return JsonResponse({
+                'success': False,
+                'error': 'Произошла внутренняя ошибка сервера',
+                'debug_info': str(e) if settings.DEBUG else None
+            })
+
 class WorkspaceKickMemberView(LoginRequiredMixin, View):
     """Удаление пользователей из рабочей области"""
     
@@ -2482,10 +2757,10 @@ todo:
         * WorkspaceAvatar
         * TeamAvatar
 
-    ⚡️ important:
+    ⚡️ after MVP:
         * tags for tasks (unique words)
-        * search for tasks
         * pinned tasks
+        * search for selectboxes
 
 edit:
   ⚡️FORM: ignore ENTER submit

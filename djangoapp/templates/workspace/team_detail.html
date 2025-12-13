@@ -3,17 +3,22 @@
 
 <div style="display: flex; flex-direction: row; gap: 10px">
     <h1>{{ team.name }}</h1>
-    {% if team_user_membership.user %}
-    <button style="cursor: pointer; height: 40px; margin-top: 20px;">Покинуть</button>
-    {% else %}
-    <button style="cursor: pointer; height: 40px; margin-top: 20px;">Присоединиться</button>
-    {% endif %}
+    
+    <!-- Кнопка присоединиться/покинуть с динамическим обновлением -->
+    <button id="joinLeaveBtn" 
+            style="cursor: pointer; height: 40px; margin-top: 20px;"
+            onclick="toggleTeamMembership()">
+        {% if is_team_member %}Покинуть{% else %}Присоединиться{% endif %}
+    </button>
+    
     <!-- Кнопка управления -->
-    <button onclick="openManagement()" style="cursor: pointer; height: 40px; margin-top: 20px;">{% if can_edit_team or can_manage_access %}Управление{% else %}Подробнее{% endif %}</button>
+    <button onclick="openManagement()" style="cursor: pointer; height: 40px; margin-top: 20px;">
+        {% if can_edit_team or can_manage_access %}Управление{% else %}Подробнее{% endif %}
+    </button>
 </div>
 
 <!-- Количество участников -->
-<div style="cursor: pointer; color: #666; margin-bottom: 20px;" onclick="openManagementWithMembers()">
+<div id="membersCount" style="cursor: pointer; color: #666; margin-bottom: 20px;" onclick="openManagementWithMembers()">
     {% with total_members=team_members.count %}
         {{ total_members }} участник{{ total_members|pluralize:"ов" }}
     {% endwith %}
@@ -26,7 +31,7 @@
 <a href="{% url 'workspace:task_list' team.workspace.url_hash %}?team={{ team.url_hash }}">Показать все задачи команды</a>
 
 <!-- Блок управления -->
-<div id="managementBlock" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1000; width: 80%; max-width: 800px; max-height: 90%; overflow-y: scroll;">
+<div id="managementBlock" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1000; width: 80%; max-width: 800px; max-height: calc(90% - 100px); overflow-y: scroll;">
     <div style="position: absolute; top: 10px; right: 10px; cursor: pointer;" onclick="closeManagement()">✕</div>
     
     <div style="display: flex;">
@@ -160,20 +165,6 @@
                 {% endif %}
             </div>
 
-            <!-- Модальное окно подтверждения удаления -->
-            <div id="confirmKickModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <h3 style="margin-top: 0;">Подтверждение удаления</h3>
-                <p id="confirmKickMessage">Вы уверены, что хотите удалить выбранных пользователей из команды?</p>
-                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-                    <button type="button" onclick="closeConfirmKickModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                        Отмена
-                    </button>
-                    <button type="button" onclick="kickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                        Удалить
-                    </button>
-                </div>
-            </div>
-
             <!-- Администрирование - только для лидеров -->
             {% if team_user_membership.role == 'leader' or workspace_user_membership.role == 'owner' %}
             <div id="contentAdmin" style="display: none;">
@@ -253,6 +244,58 @@
                         </button>
                         <span id="demoteSelectedCount" style="margin-left: 10px; color: #666;"></span>
                     </div>
+                </div>
+
+                <!-- Передача лидера команды -->
+                <div style="margin-bottom: 30px; border-top: 2px solid #eee; padding-top: 30px;">
+                    <h4 style="margin-bottom: 20px; color: #dc3545; font-size: 18px;">Передача роли лидера</h4>
+                    
+                    <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+                        <p style="margin: 0; color: #856404; font-weight: bold;">
+                            ⚠️ Внимание:<br>Вы собираетесь передать роль лидера команды другому участнику
+                        </p>
+                        <p style="margin: 5px 0 0 0; color: #856404; font-size: 14px;">
+                            После передачи вы станете участником команды и не сможете отменить это действие самостоятельно
+                        </p>
+                    </div>
+                    
+                    <form id="transferLeaderForm" style="background: #f8f9fa; padding: 20px; border-radius: 5px;">
+                        <div style="margin-bottom: 15px;">
+                            <label for="newLeaderSelect" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Выберите нового лидера команды:
+                            </label>
+                            <select id="newLeaderSelect" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; background: white; font-size: 14px;">
+                                <option value="" style="color: #999;">-- Выберите участника --</option>
+                                {% for member in team_members %}
+                                    <option value="{{ member.user.id }}" style="padding: 5px;">
+                                        {{ member.user }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <label for="passwordConfirm" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Подтвердите действие вашим паролем:
+                            </label>
+                            <input type="password" 
+                                   id="passwordConfirm" 
+                                   placeholder="Введите ваш пароль"
+                                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
+                                   autocomplete="current-password">
+                            <p style="color: #666; font-size: 13px; margin-top: 5px;">
+                                Для передачи роли лидера необходимо подтвердить вашу личность
+                            </p>
+                        </div>
+                        
+                        <button type="button" 
+                                onclick="confirmLeaderTransfer()"
+                                style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; font-size: 16px;">
+                            Передать роль лидера
+                        </button>
+                    </form>
+                    
+                    <div id="transferResult" style="margin-top: 15px; display: none;"></div>
                 </div>
             </div>
             {% endif %}
@@ -440,41 +483,573 @@
     </div>
 </div>
 
+<!-- Модальные окна -->
+<!-- Модальное окно подтверждения удаления -->
+<div id="confirmKickModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1002;">
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 25px; z-index: 1003; width: 400px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+        <h3 style="margin-top: 0; margin-bottom: 15px; color: #dc3545;">Подтверждение удаления</h3>
+        <p id="confirmKickMessage" style="margin-bottom: 20px; line-height: 1.5;">Вы уверены, что хотите удалить выбранных пользователей из команды?</p>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" onclick="closeConfirmKickModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Отмена
+            </button>
+            <button type="button" onclick="kickMembers()" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Удалить
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Модальные окна для административных действий -->
 {% if team_user_membership.role == 'leader' or workspace_user_membership.role == 'owner' %}
 <!-- Модальное окно подтверждения назначения -->
-<div id="confirmPromoteModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-    <h3 style="margin-top: 0;">Подтверждение назначения</h3>
-    <p id="confirmPromoteMessage">Вы уверены, что хотите назначить выбранных пользователей администраторами команды?</p>
-    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-        <button type="button" onclick="closeConfirmPromoteModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            Отмена
-        </button>
-        <button type="button" onclick="promoteMembers()" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            Назначить
-        </button>
+<div id="confirmPromoteModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1002;">
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 25px; z-index: 1003; width: 400px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+        <h3 style="margin-top: 0; margin-bottom: 15px; color: #28a745;">Подтверждение назначения</h3>
+        <p id="confirmPromoteMessage" style="margin-bottom: 20px; line-height: 1.5;">Вы уверены, что хотите назначить выбранных пользователей администраторами команды?</p>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" onclick="closeConfirmPromoteModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Отмена
+            </button>
+            <button type="button" onclick="promoteMembers()" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Назначить
+            </button>
+        </div>
     </div>
 </div>
 
 <!-- Модальное окно подтверждения разжалования -->
-<div id="confirmDemoteModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 20px; z-index: 1001; width: 400px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-    <h3 style="margin-top: 0;">Подтверждение разжалования</h3>
-    <p id="confirmDemoteMessage">Вы уверены, что хотите разжаловать выбранных администраторов команды?</p>
-    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-        <button type="button" onclick="closeConfirmDemoteModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            Отмена
-        </button>
-        <button type="button" onclick="demoteMembers()" style="padding: 8px 16px; background: #ffc107; color: black; border: none; border-radius: 4px; cursor: pointer;">
-            Разжаловать
-        </button>
+<div id="confirmDemoteModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1002;">
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border: 1px solid #ccc; padding: 25px; z-index: 1003; width: 400px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+        <h3 style="margin-top: 0; margin-bottom: 15px; color: #ffc107;">Подтверждение разжалования</h3>
+        <p id="confirmDemoteMessage" style="margin-bottom: 20px; line-height: 1.5;">Вы уверены, что хотите разжаловать выбранных администраторов команды?</p>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" onclick="closeConfirmDemoteModal()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Отмена
+            </button>
+            <button type="button" onclick="demoteMembers()" style="padding: 8px 16px; background: #ffc107; color: black; border: none; border-radius: 4px; cursor: pointer;">
+                Разжаловать
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения передачи лидера -->
+<div id="confirmTransferModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1002;">
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 8px; padding: 30px; width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); z-index: 1003;">
+        <h3 style="margin-top: 0; color: #dc3545; margin-bottom: 15px;">
+            ⚠️ Подтверждение передачи лидера
+        </h3>
+        
+        <div id="transferConfirmMessage" style="margin-bottom: 20px; line-height: 1.5; color: #333;">
+            <p style="margin-bottom: 10px;"><strong>Вы уверены, что хотите передать роль лидера команды?</strong></p>
+            <p style="color: #666; font-size: 14px; margin-top: 10px;">
+                После передачи:
+                <ul style="color: #666; font-size: 13px; padding-left: 20px; margin: 10px 0;">
+                    <li>Новый лидер получит все права управления командой</li>
+                    <li>Вы станете администратором команды</li>
+                    <li>Это действие не может быть отменено автоматически</li>
+                </ul>
+            </p>
+        </div>
+        
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px;">
+            <button type="button" 
+                    onclick="closeTransferModal()"
+                    style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Отмена
+            </button>
+            <button type="button" 
+                    onclick="transferLeaderRole()"
+                    style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                Подтвердить передачу
+            </button>
+        </div>
     </div>
 </div>
 {% endif %}
 
 <br>
-<a href="{% url 'workspace:workspace_detail' team.workspace.url_hash %}">Назад к рабочей области</a>
+<a href="{% url 'workspace:workspace_detail' team.workspace.url_hash %}">← Назад к рабочей области</a>
 
 <script>
+// Функция для присоединения/выхода из команды
+function toggleTeamMembership() {
+    const button = document.getElementById('joinLeaveBtn');
+    const isCurrentlyMember = button.textContent.includes('Покинуть');
+    
+    const url = isCurrentlyMember 
+        ? `{% url 'workspace:team_leave' team.workspace.url_hash team.url_hash %}`
+        : `{% url 'workspace:team_join' team.workspace.url_hash team.url_hash %}`;
+    
+    const confirmMessage = isCurrentlyMember
+        ? 'Вы уверены, что хотите покинуть команду?'
+        : 'Вы уверены, что хотите присоединиться к команде?';
+    
+    if (confirm(confirmMessage)) {
+        // Показываем индикатор загрузки
+        const originalText = button.textContent;
+        button.textContent = 'Загрузка...';
+        button.disabled = true;
+        button.style.opacity = '0.7';
+        button.style.cursor = 'wait';
+        
+        const formData = new FormData();
+        formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+        
+        fetch(url, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Обновляем текст кнопки
+                button.textContent = data.is_member ? 'Покинуть' : 'Присоединиться';
+                
+                // Обновляем счетчик участников
+                const membersCount = document.getElementById('membersCount');
+                if (membersCount) {
+                    const count = data.members_count;
+                    membersCount.textContent = `${count} участник${count === 1 ? '' : count > 1 && count < 5 ? 'а' : 'ов'}`;
+                }
+                
+                // Показываем уведомление
+                showTeamNotification(data.message, 'success');
+                
+                // Обновляем информацию о членстве в команде
+                if (typeof updateTeamManagementInfo === 'function') {
+                    updateTeamManagementInfo();
+                }
+                
+                // Если пользователь вышел из команды, проверяем права доступа
+                if (!data.is_member) {
+                    // Перезагружаем страницу, чтобы обновить права доступа
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                }
+                
+            } else {
+                // Показываем ошибку
+                showTeamNotification(data.error || 'Произошла ошибка', 'error');
+                button.textContent = originalText;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showTeamNotification('Произошла ошибка при выполнении запроса', 'error');
+            button.textContent = originalText;
+        })
+        .finally(() => {
+            button.disabled = false;
+            button.style.opacity = '1';
+            button.style.cursor = 'pointer';
+        });
+    }
+}
+
+// Функция для показа уведомлений
+function showTeamNotification(message, type) {
+    // Проверяем, есть ли уже контейнер для уведомлений
+    let notificationContainer = document.getElementById('teamNotificationContainer');
+    
+    if (!notificationContainer) {
+        notificationContainer = document.createElement('div');
+        notificationContainer.id = 'teamNotificationContainer';
+        notificationContainer.style.position = 'fixed';
+        notificationContainer.style.top = '20px';
+        notificationContainer.style.right = '20px';
+        notificationContainer.style.zIndex = '9999';
+        notificationContainer.style.maxWidth = '350px';
+        document.body.appendChild(notificationContainer);
+    }
+    
+    // Создаем уведомление
+    const notification = document.createElement('div');
+    notification.style.padding = '12px 16px';
+    notification.style.marginBottom = '10px';
+    notification.style.borderRadius = '4px';
+    notification.style.color = 'white';
+    notification.style.fontWeight = '500';
+    notification.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+    notification.style.animation = 'slideIn 0.3s ease-out';
+    notification.style.fontSize = '14px';
+    
+    if (type === 'success') {
+        notification.style.background = '#28a745';
+        notification.style.borderLeft = '4px solid #1e7e34';
+    } else {
+        notification.style.background = '#dc3545';
+        notification.style.borderLeft = '4px solid #bd2130';
+    }
+    
+    notification.textContent = message;
+    
+    // Добавляем уведомление в контейнер
+    notificationContainer.appendChild(notification);
+    
+    // Удаляем уведомление через 3 секунды
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease-in';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }, 3000);
+}
+
+// Создаем стили для анимаций
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+    
+    @keyframes slideOut {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes fadeOut {
+        from { opacity: 1; transform: translateY(0); }
+        to { opacity: 0; transform: translateY(-10px); }
+    }
+`;
+document.head.appendChild(style);
+
+// Обновленная функция передачи роли лидера с обработкой JSON
+function transferLeaderRole() {
+    const newLeaderSelect = document.getElementById('newLeaderSelect');
+    const passwordInput = document.getElementById('passwordConfirm');
+    
+    // Проверяем введенные данные
+    if (!newLeaderSelect || !newLeaderSelect.value) {
+        showTransferResult('Пожалуйста, выберите нового лидера команды', 'error');
+        return;
+    }
+    
+    if (!passwordInput || !passwordInput.value.trim()) {
+        showTransferResult('Для подтверждения необходимо ввести ваш пароль', 'error');
+        return;
+    }
+    
+    // Получаем выбранные данные
+    const newLeaderId = newLeaderSelect.value;
+    const password = passwordInput.value;
+    
+    // Показываем индикатор загрузки
+    const confirmBtn = document.querySelector('#confirmTransferModal button[onclick="transferLeaderRole()"]');
+    const originalBtnText = confirmBtn.textContent;
+    confirmBtn.textContent = 'Обработка...';
+    confirmBtn.disabled = true;
+    confirmBtn.style.opacity = '0.7';
+    confirmBtn.style.cursor = 'wait';
+    
+    // Создаем FormData для отправки
+    const formData = new FormData();
+    formData.append('new_leader_id', newLeaderId);
+    formData.append('password', password);
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    // Отправляем AJAX запрос
+    fetch(`{% url 'workspace:team_transfer_leader' team.workspace.url_hash team.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => {
+        // Проверяем статус ответа
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Закрываем модальное окно
+        closeTransferModal();
+        
+        if (data.success) {
+            // Обрабатываем успешный ответ
+            handleSuccessfulTransfer(data);
+        } else {
+            // Обрабатываем ошибку
+            handleTransferError(data);
+        }
+    })
+    .catch(error => {
+        console.error('Ошибка при передаче лидера:', error);
+        closeTransferModal();
+        
+        showTransferResult(
+            'Произошла ошибка при отправке запроса. Пожалуйста, попробуйте еще раз.', 
+            'error'
+        );
+        
+        // Восстанавливаем кнопку
+        confirmBtn.textContent = originalBtnText;
+        confirmBtn.disabled = false;
+        confirmBtn.style.opacity = '1';
+        confirmBtn.style.cursor = 'pointer';
+    });
+}
+
+// Обработка успешной передачи лидера
+function handleSuccessfulTransfer(responseData) {
+    const data = responseData.data;
+    
+    // Формируем подробное сообщение об успехе
+    const successMessage = `
+        <div style="padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724;">
+            <div style="font-weight: bold; margin-bottom: 10px; font-size: 16px;">
+                ✅ ${responseData.message}
+            </div>
+            <div style="font-size: 14px;">
+                <p style="margin: 5px 0;">
+                    <strong>Новый лидер:</strong> ${data.new_leader.full_name} (@${data.new_leader.username})
+                </p>
+                <p style="margin: 5px 0;">
+                    <strong>Ваша новая роль:</strong> ${data.current_user.role_display}
+                </p>
+                <p style="margin: 5px 0; font-size: 13px; color: #0c5460;">
+                    Страница будет автоматически обновлена...
+                </p>
+            </div>
+        </div>
+    `;
+    
+    // Показываем сообщение
+    showTransferResult(successMessage, 'success');
+    
+    // Обновляем интерфейс перед перезагрузкой
+    updateInterfaceAfterTransfer(data);
+    
+    // Обновляем страницу через 3 секунды
+    setTimeout(() => {
+        window.location.reload();
+    }, 3000);
+}
+
+// Обработка ошибки при передаче лидера
+function handleTransferError(errorData) {
+    // Формируем сообщение об ошибке
+    const errorMessage = `
+        <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; color: #721c24;">
+            <div style="font-weight: bold; margin-bottom: 5px; font-size: 16px;">
+                ❌ ${errorData.error}
+            </div>
+            ${errorData.debug_info ? 
+                `<div style="margin-top: 10px; padding: 8px; background: #f1f1f1; border-radius: 3px; font-size: 12px; color: #721c24;">
+                    <strong>Отладочная информация:</strong><br>
+                    ${errorData.debug_info}
+                </div>` 
+                : ''
+            }
+        </div>
+    `;
+    
+    // Показываем сообщение об ошибке
+    showTransferResult(errorMessage, 'error');
+    
+    // Восстанавливаем кнопку в модальном окне
+    const confirmBtn = document.querySelector('#confirmTransferModal button[onclick="transferLeaderRole()"]');
+    if (confirmBtn) {
+        confirmBtn.textContent = 'Подтвердить передачу';
+        confirmBtn.disabled = false;
+        confirmBtn.style.opacity = '1';
+        confirmBtn.style.cursor = 'pointer';
+    }
+}
+
+// Обновление интерфейса после успешной передачи
+function updateInterfaceAfterTransfer(data) {
+    // Обновляем информацию о текущем пользователе
+    const userRoleElements = document.querySelectorAll('.user-role-display');
+    userRoleElements.forEach(element => {
+        if (element.dataset.userId === data.current_user.id.toString()) {
+            element.textContent = data.current_user.role_display;
+            element.className = `user-role-display role-${data.current_user.role}`;
+        }
+    });
+    
+    // Обновляем информацию о новом лидере
+    const newLeaderElements = document.querySelectorAll('.member-role');
+    newLeaderElements.forEach(element => {
+        if (element.dataset.userId === data.new_leader.id.toString()) {
+            element.textContent = 'Лидер';
+            element.className = 'member-role role-leader';
+        }
+    });
+    
+    // Обновляем доступные опции в форме передачи лидера
+    const newLeaderSelect = document.getElementById('newLeaderSelect');
+    if (newLeaderSelect) {
+        // Удаляем выбранного пользователя из списка (так как он теперь лидер)
+        Array.from(newLeaderSelect.options).forEach(option => {
+            if (option.value === data.new_leader.id.toString()) {
+                option.disabled = true;
+                option.textContent += ' (Текущий лидер)';
+            }
+        });
+        
+        // Добавляем текущего пользователя в список (если он не лидер)
+        if (data.current_user.role !== 'leader') {
+            const currentUserOption = document.createElement('option');
+            currentUserOption.value = data.current_user.id;
+            currentUserOption.textContent = `${data.current_user.username} (${data.current_user.role_display})`;
+            newLeaderSelect.appendChild(currentUserOption);
+        }
+    }
+    
+    // Обновляем кнопки управления доступом
+    updateManagementButtons(data.current_user.role);
+}
+
+// Обновление кнопок управления в зависимости от роли
+function updateManagementButtons(userRole) {
+    const managementButtons = {
+        'manageAccess': document.querySelector('[data-permission="can_manage_access"]'),
+        'editTeam': document.querySelector('[data-permission="can_edit_team"]'),
+        'inviteUsers': document.querySelector('[data-permission="can_invite_users"]')
+    };
+    
+    // Если пользователь больше не лидер, ограничиваем доступ к некоторым функциям
+    if (userRole !== 'leader') {
+        Object.values(managementButtons).forEach(button => {
+            if (button) {
+                button.style.opacity = '0.6';
+                button.style.cursor = 'not-allowed';
+                button.title = 'Доступно только для лидера команды';
+                button.onclick = null;
+            }
+        });
+    }
+}
+
+// Обновленная функция показа результатов
+function showTransferResult(content, type) {
+    const resultDiv = document.getElementById('transferResult');
+    
+    // Если content - это HTML, используем innerHTML, иначе создаем текстовый элемент
+    if (typeof content === 'string' && content.includes('<')) {
+        resultDiv.innerHTML = content;
+    } else {
+        resultDiv.innerHTML = `
+            <div style="padding: 12px; border-radius: 4px; background: ${type === 'success' ? '#d4edda' : '#f8d7da'}; color: ${type === 'success' ? '#155724' : '#721c24'}; border: 1px solid ${type === 'success' ? '#c3e6cb' : '#f5c6cb'};">
+                ${content}
+            </div>
+        `;
+    }
+    
+    resultDiv.style.display = 'block';
+    resultDiv.style.animation = 'fadeIn 0.3s ease-out';
+    
+    // Автоматически скрываем сообщения об ошибках через 8 секунд
+    if (type === 'error') {
+        setTimeout(() => {
+            resultDiv.style.opacity = '0';
+            resultDiv.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+                resultDiv.style.opacity = '1';
+            }, 500);
+        }, 8000);
+    }
+}
+
+// Обновленная функция подтверждения передачи
+function confirmLeaderTransfer() {
+    const newLeaderSelect = document.getElementById('newLeaderSelect');
+    const passwordInput = document.getElementById('passwordConfirm');
+    
+    // Валидация на клиенте
+    if (!newLeaderSelect || !newLeaderSelect.value) {
+        showTransferResult('Пожалуйста, выберите нового лидера команды', 'error');
+        return;
+    }
+    
+    if (!passwordInput || !passwordInput.value.trim()) {
+        showTransferResult('Для подтверждения необходимо ввести ваш пароль', 'error');
+        return;
+    }
+    
+    // Получаем информацию о выбранном лидере
+    const selectedOption = newLeaderSelect.options[newLeaderSelect.selectedIndex];
+    const newLeaderName = selectedOption.text.split(' - ')[0];
+    
+    // Обновляем текст в модальном окне
+    const messageDiv = document.getElementById('transferConfirmMessage');
+    messageDiv.innerHTML = `
+        <div style="margin-bottom: 15px;">
+            <p style="margin-bottom: 10px;">
+                Вы собираетесь передать роль лидера команды пользователю:
+            </p>
+            <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; margin: 10px 0; border-left: 4px solid #dc3545;">
+                <strong>${newLeaderName}</strong>
+            </div>
+            <p style="color: #666; font-size: 14px;">
+                После подтверждения:
+                <ul style="color: #666; font-size: 13px; margin: 8px 0 8px 20px;">
+                    <li>Вы станете участником команды</li>
+                    <li>Новый лидер получит полный контроль над командой</li>
+                    <li>Это действие нельзя отменить</li>
+                </ul>
+            </p>
+        </div>
+    `;
+    
+    // Показываем модальное окно
+    document.getElementById('confirmTransferModal').style.display = 'block';
+}
+
+// Закрытие модального окна
+function closeTransferModal() {
+    document.getElementById('confirmTransferModal').style.display = 'none';
+    // Очищаем поле пароля для безопасности
+    const passwordInput = document.getElementById('passwordConfirm');
+    if (passwordInput) {
+        passwordInput.value = '';
+    }
+}
+
+// Функция для обновления информации в блоке управления
+function updateTeamManagementInfo() {
+    // Эта функция может быть расширена для динамического обновления
+    // списков участников в модальном окне управления
+    console.log('Team membership changed - update management info if needed');
+}
+
+// Обновляем состояние кнопки при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    // Проверяем, если пользователь вышел из команды через другие средства
+    // мы могли бы добавить здесь polling или websocket для обновления статуса
+    console.log('Team detail page loaded');
+});
+
 // Добавляем функцию для сохранения основных настроек команды
 function saveTeamMainSettings() {
     const name = document.getElementById('teamName').value;
@@ -563,7 +1138,6 @@ function loadTeamAccessSettings() {
     });
 }
 
-// Функция для обновления состояния чекбоксов команды на основе данных
 // Функция для обновления состояния чекбоксов команды на основе данных
 function updateTeamCheckboxState(settings) {
     const permissions = [
