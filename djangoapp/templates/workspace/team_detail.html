@@ -297,6 +297,50 @@
                     
                     <div id="transferResult" style="margin-top: 15px; display: none;"></div>
                 </div>
+
+                <!-- Удаление команды -->
+                <div style="margin-top: 50px; padding-top: 30px; border-top: 3px solid #dc3545;">
+                    <h4 style="margin-bottom: 20px; color: #dc3545; font-size: 18px;">Удаление команды</h4>
+                    
+                    <div style="background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; padding: 20px; margin-bottom: 20px;">
+                        <p style="margin: 0; color: #721c24; font-weight: bold;">
+                            ⚠️ Опасное действие: Удаление команды
+                        </p>
+                        <p style="margin: 10px 0 0 0; color: #721c24; font-size: 14px;">
+                            При удалении команды будут выполнены следующие действия:
+                        </p>
+                        <ul style="color: #721c24; font-size: 14px; margin: 10px 0 0 20px; padding: 0;">
+                            <li>Все задачи, назначенные на эту команду, будут удалены ({{ tasks.count }} задач)</li>
+                            <li>Все участники команды будут удалены из команды</li>
+                            <li>Все настройки доступа команды будут удалены</li>
+                            <li>Это действие нельзя отменить</li>
+                        </ul>
+                    </div>
+                    
+                    <!-- Для лидеров команды требуется подтверждение паролем -->
+                    <form id="deleteTeamForm" style="background: #f8f9fa; padding: 20px; border-radius: 5px;">
+                        <div style="margin-bottom: 20px;">
+                            <label for="deletePasswordConfirm" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Для подтверждения удаления введите ваш пароль:
+                            </label>
+                            <input type="password" 
+                                id="deletePasswordConfirm" 
+                                placeholder="Введите ваш пароль"
+                                style="width: 100%; padding: 10px; border: 1px solid #dc3545; border-radius: 4px; font-size: 14px;"
+                                autocomplete="current-password">
+                            <p style="color: #666; font-size: 13px; margin-top: 5px;">
+                                Это действие требует подтверждения вашей личности
+                            </p>
+                        </div>
+                        
+                        <button type="button" 
+                                onclick="confirmTeamDelete()"
+                                style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; font-size: 16px;">
+                            Удалить команду
+                        </button>
+                    </form>
+                    <div id="deleteResult" style="margin-top: 15px; display: none;"></div>
+                </div>
             </div>
             {% endif %}
 
@@ -563,6 +607,51 @@
                     onclick="transferLeaderRole()"
                     style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
                 Подтвердить передачу
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения удаления команды -->
+<div id="confirmDeleteTeamModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1002;">
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 8px; padding: 30px; width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1003;">
+        <h3 style="margin-top: 0; color: #dc3545; margin-bottom: 15px; border-bottom: 2px solid #f5c6cb; padding-bottom: 10px;">
+            ⚠️ Подтверждение удаления команды
+        </h3>
+        
+        <div id="deleteTeamConfirmMessage" style="margin-bottom: 20px; line-height: 1.5; color: #333;">
+            <p style="margin-bottom: 15px; font-weight: bold; color: #721c24;">
+                Вы собираетесь удалить команду <strong>"{{ team.name }}"</strong> из рабочей области <strong>"{{ team.workspace.name }}"</strong>
+            </p>
+            
+            <div style="background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; padding: 15px; margin-bottom: 15px;">
+                <p style="margin: 0 0 10px 0; color: #721c24; font-weight: bold;">
+                    Это действие приведет к:
+                </p>
+                <ul style="color: #721c24; margin: 0; padding-left: 20px;">
+                    <li>Удалению всех задач команды ({{ tasks.count }} задач)</li>
+                    <li>Удалению всех участников из команды</li>
+                    <li>Удалению настроек доступа команды</li>
+                    <li style="font-weight: bold;">Это действие нельзя отменить!</li>
+                </ul>
+            </div>
+            
+            <p style="color: #856404; font-size: 14px; background: #fff3cd; padding: 10px; border-radius: 4px;">
+                <strong>Внимание:</strong> Все данные будут безвозвратно удалены.
+            </p>
+        </div>
+        
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px; border-top: 1px solid #eee; padding-top: 20px;">
+            <button type="button" 
+                    onclick="closeDeleteTeamModal()"
+                    style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; min-width: 100px;">
+                Отмена
+            </button>
+            <button type="button" 
+                    onclick="deleteTeam()"
+                    id="confirmDeleteTeamBtn"
+                    style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; min-width: 100px;">
+                Удалить команду
             </button>
         </div>
     </div>
@@ -1760,6 +1849,173 @@ function demoteMembers() {
         console.error('Error:', error);
         alert('Произошла ошибка при отправке запроса');
     });
+}
+
+// Удаление команды
+function confirmTeamDelete() {
+    // Проверяем пароль
+    {% if team_user_membership.role == 'leader' or workspace_user_membership.role == 'owner' %}
+    const passwordInput = document.getElementById('deletePasswordConfirm');
+    if (!passwordInput || !passwordInput.value.trim()) {
+        showDeleteResult('Для подтверждения удаления необходимо ввести ваш пароль', 'error');
+        return;
+    }
+    {% endif %}
+    
+    // Показываем модальное окно подтверждения
+    document.getElementById('confirmDeleteTeamModal').style.display = 'block';
+}
+
+function closeDeleteTeamModal() {
+    document.getElementById('confirmDeleteTeamModal').style.display = 'none';
+}
+
+function deleteTeam() {
+    // Показываем индикатор загрузки
+    const confirmBtn = document.getElementById('confirmDeleteTeamBtn');
+    const originalBtnText = confirmBtn.textContent;
+    confirmBtn.textContent = 'Удаление...';
+    confirmBtn.disabled = true;
+    confirmBtn.style.opacity = '0.7';
+    confirmBtn.style.cursor = 'wait';
+    
+    // Создаем FormData для отправки
+    const formData = new FormData();
+    
+    // Добавляем пароль
+    {% if team_user_membership.role == 'leader' or workspace_user_membership.role == 'owner' %}
+    const passwordInput = document.getElementById('deletePasswordConfirm');
+    if (passwordInput && passwordInput.value.trim()) {
+        formData.append('password', passwordInput.value.trim());
+    }
+    {% endif %}
+    
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    // Отправляем AJAX запрос
+    fetch(`{% url 'workspace:team_delete' team.workspace.url_hash team.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => {
+        // Проверяем статус ответа
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Закрываем модальное окно
+        closeDeleteTeamModal();
+        
+        if (data.success) {
+            // Показываем успешное сообщение
+            const successMessage = `
+                <div style="padding: 20px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724;">
+                    <div style="font-weight: bold; margin-bottom: 10px; font-size: 16px;">
+                        ✅ ${data.message}
+                    </div>
+                    <div style="font-size: 14px;">
+                        <p style="margin: 5px 0;">
+                            <strong>Команда:</strong> ${data.stats.team_name}
+                        </p>
+                        <p style="margin: 5px 0;">
+                            <strong>Удалено задач:</strong> ${data.stats.tasks_deleted}
+                        </p>
+                        <p style="margin: 5px 0;">
+                            <strong>Участников оповещено:</strong> ${data.stats.members_notified}
+                        </p>
+                        <p style="margin: 10px 0 0 0; font-size: 13px; color: #0c5460;">
+                            Перенаправление на страницу рабочей области...
+                        </p>
+                    </div>
+                </div>
+            `;
+            
+            showDeleteResult(successMessage, 'success');
+            
+            // Перенаправляем на страницу рабочей области через 3 секунды
+            setTimeout(() => {
+                if (data.redirect_url) {
+                    window.location.href = data.redirect_url;
+                } else {
+                    window.location.href = `{% url 'workspace:workspace_detail' team.workspace.url_hash %}`;
+                }
+            }, 3000);
+            
+        } else {
+            // Обрабатываем ошибку
+            const errorMessage = `
+                <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; color: #721c24;">
+                    <div style="font-weight: bold; margin-bottom: 5px; font-size: 16px;">
+                        ❌ ${data.error}
+                    </div>
+                </div>
+            `;
+            
+            showDeleteResult(errorMessage, 'error');
+            
+            // Восстанавливаем кнопку
+            confirmBtn.textContent = originalBtnText;
+            confirmBtn.disabled = false;
+            confirmBtn.style.opacity = '1';
+            confirmBtn.style.cursor = 'pointer';
+        }
+    })
+    .catch(error => {
+        console.error('Ошибка при удалении команды:', error);
+        closeDeleteTeamModal();
+        
+        const errorMessage = `
+            <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; color: #721c24;">
+                <div style="font-weight: bold; margin-bottom: 5px; font-size: 16px;">
+                    ❌ Произошла ошибка при отправке запроса
+                </div>
+            </div>
+        `;
+        
+        showDeleteResult(errorMessage, 'error');
+        
+        // Восстанавливаем кнопку
+        confirmBtn.textContent = originalBtnText;
+        confirmBtn.disabled = false;
+        confirmBtn.style.opacity = '1';
+        confirmBtn.style.cursor = 'pointer';
+    });
+}
+
+// Функция для показа результатов удаления команды
+function showDeleteResult(content, type) {
+    const resultDiv = document.getElementById('deleteResult');
+    
+    // Если content - это HTML, используем innerHTML, иначе создаем текстовый элемент
+    if (typeof content === 'string' && content.includes('<')) {
+        resultDiv.innerHTML = content;
+    } else {
+        resultDiv.innerHTML = `
+            <div style="padding: 12px; border-radius: 4px; background: ${type === 'success' ? '#d4edda' : '#f8d7da'}; color: ${type === 'success' ? '#155724' : '#721c24'}; border: 1px solid ${type === 'success' ? '#c3e6cb' : '#f5c6cb'};">
+                ${content}
+            </div>
+        `;
+    }
+    
+    resultDiv.style.display = 'block';
+    resultDiv.style.animation = 'fadeIn 0.3s ease-out';
+    
+    // Автоматически скрываем сообщения об ошибках через 8 секунд
+    if (type === 'error') {
+        setTimeout(() => {
+            resultDiv.style.opacity = '0';
+            resultDiv.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+                resultDiv.style.opacity = '1';
+            }, 500);
+        }, 8000);
+    }
 }
 </script>
 

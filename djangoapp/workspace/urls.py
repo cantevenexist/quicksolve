@@ -39,8 +39,9 @@ urlpatterns = [
     path('<str:workspace_url_hash>/team/<str:team_url_hash>/access-settings/save/', views.SaveTeamAccessSettingsView.as_view(), name='save_team_access_settings'),
     path('<str:workspace_url_hash>/<str:team_url_hash>/access-settings/get/', views.GetTeamAccessView.as_view(), name='get_team_access_settings'),
 
-    # === FOLLOW, LEAVE, TRANSFER LEADER TEAM ===
+    # === JOIN, LEAVE, TRANSFER LEADER, DELETE TEAM ===
     path('<str:workspace_url_hash>/team/<str:team_url_hash>/join/', views.TeamJoinView.as_view(), name='team_join'),
     path('<str:workspace_url_hash>/team/<str:team_url_hash>/leave/', views.TeamLeaveView.as_view(), name='team_leave'),
     path('<str:workspace_url_hash>/teams/<str:team_url_hash>/transfer-leader/', views.TeamTransferLeaderRoleView.as_view(), name='team_transfer_leader'),
+    path('<str:workspace_url_hash>/teams/<str:team_url_hash>/delete/', views.TeamDeleteView.as_view(), name='team_delete'),
 ]

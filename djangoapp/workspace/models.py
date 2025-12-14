@@ -483,7 +483,7 @@ class Task(models.Model):
     )
     assignee = models.ForeignKey(
         User, 
-        on_delete=models.SET_NULL, 
+        on_delete=models.SET_NULL,
         null=True, 
         blank=True,
         related_name='assigned_tasks',
@@ -491,7 +491,9 @@ class Task(models.Model):
     )
     reporter = models.ForeignKey(
         User, 
-        on_delete=models.CASCADE, 
+        on_delete=models.SET_NULL,
+        null=True, 
+        blank=True,
         related_name='reported_tasks',
         verbose_name='Автор'
     )
@@ -827,7 +829,9 @@ class IndividualInvitation(models.Model):
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
     created_by = models.ForeignKey(
         User, 
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='created_invitations'
     )
     invited_user = models.ForeignKey(

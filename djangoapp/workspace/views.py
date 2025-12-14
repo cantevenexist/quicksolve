@@ -2030,6 +2030,162 @@ class TeamTransferLeaderRoleView(LoginRequiredMixin, View):
                 'debug_info': str(e) if settings.DEBUG else None
             })
 
+class TeamDeleteView(LoginRequiredMixin, View):
+    """Представление для удаления команды"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        team = get_object_or_404(
+            Team, 
+            url_hash=kwargs['team_url_hash'],
+            workspace__url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем права: только лидер команды или владелец рабочей области
+        team_membership = TeamMembership.objects.filter(
+            team=team,
+            user=request.user,
+            role='leader'
+        ).first()
+        
+        workspace_membership = WorkspaceMembership.objects.filter(
+            workspace=team.workspace,
+            user=request.user,
+            role='owner'
+        ).first()
+        
+        if not (team_membership or workspace_membership):
+            return JsonResponse({
+                'success': False, 
+                'error': 'У вас нет прав для удаления команды. Только лидер команды или владелец рабочей области могут удалить команду.'
+            })
+        
+        # Проверяем пароль для подтверждения
+        if team_membership or workspace_membership:
+            password = request.POST.get('password')
+            if not password:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Для подтверждения удаления команды необходимо ввести ваш пароль'
+                })
+            
+            # Проверяем пароль текущего пользователя
+            user = authenticate(
+                username=request.user.username,
+                password=password
+            )
+            
+            if not user:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Неверный пароль. Проверьте правильность ввода.'
+                })
+        
+        try:
+            # Выполняем все операции в транзакции
+            with transaction.atomic():
+                # Получаем информацию перед удалением для уведомлений
+                team_name = team.name
+                workspace_name = team.workspace.name
+                team_members = list(team.members.all())
+                tasks_count = Task.objects.filter(team=team).count()
+                
+                # Удаляем все задачи команды
+                Task.objects.filter(team=team).delete()
+                
+                # Удаляем настройки доступа команды
+                TeamRoleAccess.objects.filter(team=team).delete()
+                
+                # Удаляем всех участников команды
+                TeamMembership.objects.filter(team=team).delete()
+                
+                # Удаляем саму команду
+                team.delete()
+                
+                # Создаем уведомления для всех бывших участников команды
+                for member in team_members:
+                    if member != request.user:  # Не создаем уведомление для того, кто удалил команду
+                        self.create_team_deleted_notification(
+                            member, 
+                            team_name, 
+                            workspace_name, 
+                            tasks_count,
+                            request
+                        )
+                
+                # Создаем уведомление для пользователя, который удалил команду
+                self.create_deleter_notification(
+                    request.user,
+                    team_name,
+                    workspace_name,
+                    tasks_count,
+                    len(team_members)
+                )
+                
+                return JsonResponse({
+                    'success': True,
+                    'message': f'Команда "{team_name}" успешно удалена',
+                    'redirect_url': reverse('workspace:workspace_detail', kwargs={
+                        'workspace_url_hash': kwargs['workspace_url_hash']
+                    }),
+                    'stats': {
+                        'team_name': team_name,
+                        'tasks_deleted': tasks_count,
+                        'members_notified': len(team_members)
+                    }
+                })
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Ошибка при удалении команды: {str(e)}", exc_info=True)
+            
+            return JsonResponse({
+                'success': False,
+                'error': 'Произошла внутренняя ошибка сервера при удалении команды',
+                'debug_info': str(e) if settings.DEBUG else None
+            })
+    
+    def create_team_deleted_notification(self, user, team_name, workspace_name, tasks_count, request):
+        """Создает уведомление об удалении команды для участников"""
+        workspace_url = request.build_absolute_uri(
+            reverse('workspace:workspace_detail', kwargs={
+                'workspace_url_hash': request.resolver_match.kwargs['workspace_url_hash']
+            })
+        )
+        
+        message = f'Команда "{team_name}" в рабочей области "{workspace_name}" была удалена'
+        if tasks_count > 0:
+            message += f'\nВместе с командой удалено {tasks_count} задач'
+        
+        Notification.objects.create(
+            user=user,
+            message=message,
+            level='warning',
+            related_url=workspace_url
+        )
+    
+    def create_deleter_notification(self, user, team_name, workspace_name, tasks_count, members_count):
+        """Создает уведомление для пользователя, который удалил команду"""
+        message = f'Вы успешно удалили команду "{team_name}" из рабочей области "{workspace_name}"'
+        
+        details = []
+        if tasks_count > 0:
+            details.append(f'удалено {tasks_count} задач')
+        if members_count > 0:
+            details.append(f'оповещено {members_count} участников')
+        
+        if details:
+            message += f'\n' + ', '.join(details)
+        
+        Notification.objects.create(
+            user=user,
+            message=message,
+            level='info'
+        )
+
 class WorkspaceKickMemberView(LoginRequiredMixin, View):
     """Удаление пользователей из рабочей области"""
     
@@ -2842,10 +2998,13 @@ class GetTeamAccessView(LoginRequiredMixin, View):
         })
 '''
 todo:
-    ⚡️* GetOutWorkspaceView
-    ⚡️* GetOutTeamView
-    ⚡️* WorkspaceEditView
-    ⚡️* TeamEditView
+    ⚡️ GetOutWorkspaceView
+
+    ⚡️ WorkspaceEditView
+    ⚡️ TeamEditView
+    ⚡️ WorkspaceTransferOwnerView
+    ⚡️ WorkspaceDeleteView
+    ⚡️ TeamDeleteView
     
     ⚡️ medium important:
         * ProfileAvatar
@@ -2855,8 +3014,5 @@ todo:
     ⚡️ after MVP:
         * tags for tasks (unique words)
         * pinned tasks
-        * search for selectboxes
-
-edit:
-  ⚡️FORM: ignore ENTER submit
+        * search for select inputs
 '''
