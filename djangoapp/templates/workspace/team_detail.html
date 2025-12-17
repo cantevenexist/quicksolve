@@ -55,25 +55,84 @@
         <div style="width: 70%; padding-left: 20px;">
             <!-- Главное - доступно всем, но редактирование только с правами -->
             <div id="contentMain" style="display: block;">
-                <h3>Основные настройки</h3>
+                <h3 style="margin-top: 0; margin-bottom: 20px;">Основные настройки команды</h3>
                 
                 {% if can_edit_team %}
-                <form id="teamMainForm">
-                    <div>
-                        <label>Название:</label>
-                        <input type="text" id="teamName" value="{{ team.name }}" style="width: 100%; margin-bottom: 10px;">
-                    </div>
-                    <div>
-                        <label>Описание:</label>
-                        <textarea id="teamDescription" style="width: 100%; height: 100px; margin-bottom: 10px;">{{ team.description|default:'' }}</textarea>
-                    </div>
-                    <button type="button" onclick="saveTeamMainSettings()">Сохранить</button>
-                </form>
+                <div id="teamMainFormContainer">
+                    <form id="teamMainForm" onsubmit="event.preventDefault(); saveTeamMainSettings();">
+                        <div style="margin-bottom: 20px;">
+                            <label for="teamName" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Название команды:
+                            </label>
+                            <input type="text" 
+                                id="teamName" 
+                                value="{{ team.name }}" 
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 14px;"
+                                placeholder="Введите название команды"
+                                maxlength="255"
+                                required>
+                            <!-- <p style="color: #666; font-size: 13px; margin-top: 5px;">
+                                Минимум 2 символа, максимум 100 символов
+                            </p> -->
+                        </div>
+                        
+                        <div style="margin-bottom: 25px;">
+                            <label for="teamDescription" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Описание команды:
+                            </label>
+                            <textarea id="teamDescription" 
+                                    style="width: 100%; height: 120px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 14px; resize: vertical;"
+                                    placeholder="Опишите цель и задачи команды (необязательно)" maxlength="255">{{ team.description|default:'' }}</textarea>
+                            <p style="color: #666; font-size: 13px; margin-top: 5px;">
+                                Необязательное поле для дополнительной информации о команде
+                            </p>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: flex-start; gap: 10px; margin-top: 25px;">
+                            <button type="submit" 
+                                    id="saveTeamSettingsBtn"
+                                    style="background: #28a745; color: white; border: none; padding: 10px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; min-width: 120px;">
+                                Сохранить изменения
+                            </button>
+                            <button type="button" 
+                                    onclick="resetTeamForm()"
+                                    style="background: #6c757d; color: white; border: none; padding: 10px 24px; border-radius: 4px; cursor: pointer; font-size: 14px; min-width: 120px;">
+                                Отмена
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <div id="teamEditResult" style="margin-top: 15px; display: none;"></div>
+                </div>
                 {% else %}
-                <div>
-                    <p><strong>Название:</strong> {{ team.name }}</p>
-                    <p><strong>Описание:</strong> {{ team.description|default:"Не указано" }}</p>
-                    <p style="color: #666; font-style: italic;">Для изменения настроек обратитесь к лидеру команды</p>
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 5px; border: 1px solid #e0e0e0;">
+                    <div style="margin-bottom: 15px;">
+                        <p style="margin: 0 0 10px 0; font-weight: bold; color: #333;">
+                            <strong>Название команды:</strong>
+                        </p>
+                        <p style="margin: 0; padding: 10px; background: white; border-radius: 4px; border: 1px solid #e0e0e0;">
+                            {{ team.name }}
+                        </p>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <p style="margin: 0 0 10px 0; font-weight: bold; color: #333;">
+                            <strong>Описание команды:</strong>
+                        </p>
+                        <div style="padding: 10px; background: white; border-radius: 4px; border: 1px solid #e0e0e0; min-height: 80px;">
+                            {% if team.description %}
+                                {{ team.description|linebreaksbr }}
+                            {% else %}
+                                <span style="color: #999; font-style: italic;">Описание не указано</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 12px; margin-top: 20px;">
+                        <p style="margin: 0; color: #856404; font-size: 14px;">
+                            <strong>⚠️ Информация:</strong> Для изменения настроек команды обратитесь к лидеру команды
+                        </p>
+                    </div>
                 </div>
                 {% endif %}
             </div>
@@ -1139,36 +1198,175 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Team detail page loaded');
 });
 
-// Добавляем функцию для сохранения основных настроек команды
+// Функция для сохранения основных настроек команды
 function saveTeamMainSettings() {
-    const name = document.getElementById('teamName').value;
-    const description = document.getElementById('teamDescription').value;
+    const name = document.getElementById('teamName').value.trim();
+    const description = document.getElementById('teamDescription').value.trim();
+    const saveBtn = document.getElementById('saveTeamSettingsBtn');
+    
+    // Валидация на клиенте
+    if (!name) {
+        showTeamEditResult('Название команды не может быть пустым', 'error');
+        return;
+    }
+    
+    if (name.length > 255) {
+        showTeamEditResult('Название команды не может превышать 255 символов', 'error');
+        return;
+    }
+    
+    if (description.length > 255) {
+        showTeamEditResult('Описание команды не может превышать 255 символов', 'error');
+        return;
+    }
+    // Показываем индикатор загрузки
+    const originalBtnText = saveBtn.textContent;
+    saveBtn.textContent = 'Сохранение...';
+    saveBtn.disabled = true;
+    saveBtn.style.opacity = '0.7';
+    saveBtn.style.cursor = 'wait';
     
     const formData = new FormData();
     formData.append('name', name);
     formData.append('description', description);
     formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
     
-    // Нужно создать соответствующий URL в urls.py и view
-    fetch(`{% url 'workspace:workspace_index' %}`, {
+    fetch(`{% url 'workspace:team_edit' team.workspace.url_hash team.url_hash %}`, {
         method: 'POST',
         body: formData,
-        headers: {'X-Requested-With': 'XMLHttpRequest'}
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
-            alert('Настройки команды успешно сохранены');
-            location.reload();
+            // Показываем успешное сообщение
+            let successMessage = data.message;
+            
+            if (data.changes && data.changes.length > 0) {
+                successMessage += '<br><br><strong>Изменения:</strong><br>';
+                successMessage += data.changes.map(change => `• ${change}`).join('<br>');
+            }
+            
+            showTeamEditResult(successMessage, 'success');
+            
+            // Обновляем заголовок страницы
+            const pageTitle = document.querySelector('h1');
+            if (pageTitle) {
+                pageTitle.textContent = data.team.name;
+            }
+            
+            // Сохраняем новые значения для сброса формы
+            window.lastSavedTeamData = {
+                name: data.team.name,
+                description: data.team.description || ''
+            };
+            
+            // Обновляем страницу через 3 секунды
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+            
         } else {
-            alert('Ошибка при сохранении: ' + (data.error || 'Неизвестная ошибка'));
+            // Показываем ошибку
+            showTeamEditResult(data.error || 'Произошла ошибка при сохранении', 'error');
+            saveBtn.textContent = originalBtnText;
+            saveBtn.disabled = false;
+            saveBtn.style.opacity = '1';
+            saveBtn.style.cursor = 'pointer';
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('Ошибка при сохранении настроек команды');
+        showTeamEditResult('Произошла ошибка при отправке запроса', 'error');
+        saveBtn.textContent = originalBtnText;
+        saveBtn.disabled = false;
+        saveBtn.style.opacity = '1';
+        saveBtn.style.cursor = 'pointer';
     });
 }
+
+// Функция для сброса формы к исходным значениям
+function resetTeamForm() {
+    const nameInput = document.getElementById('teamName');
+    const descriptionInput = document.getElementById('teamDescription');
+    
+    if (window.lastSavedTeamData) {
+        // Если есть сохраненные данные, используем их
+        nameInput.value = window.lastSavedTeamData.name;
+        descriptionInput.value = window.lastSavedTeamData.description;
+    } else {
+        // Иначе используем исходные значения со страницы
+        nameInput.value = '{{ team.name }}';
+        descriptionInput.value = '{{ team.description|default:"" }}';
+    }
+    
+    // Скрываем результат
+    document.getElementById('teamEditResult').style.display = 'none';
+}
+
+// Функция для показа результатов редактирования команды
+function showTeamEditResult(content, type) {
+    const resultDiv = document.getElementById('teamEditResult');
+    
+    // Если content - это HTML, используем innerHTML, иначе создаем текстовый элемент
+    if (typeof content === 'string' && content.includes('<')) {
+        resultDiv.innerHTML = content;
+    } else {
+        resultDiv.innerHTML = `
+            <div style="padding: 12px; border-radius: 4px; background: ${type === 'success' ? '#d4edda' : '#f8d7da'}; color: ${type === 'success' ? '#155724' : '#721c24'}; border: 1px solid ${type === 'success' ? '#c3e6cb' : '#f5c6cb'};">
+                ${content}
+            </div>
+        `;
+    }
+    
+    resultDiv.style.display = 'block';
+    resultDiv.style.animation = 'fadeIn 0.3s ease-out';
+    
+    // Автоматически скрываем сообщения об ошибках через 8 секунд
+    if (type === 'error') {
+        setTimeout(() => {
+            resultDiv.style.opacity = '0';
+            resultDiv.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+                resultDiv.style.opacity = '1';
+            }, 500);
+        }, 8000);
+    }
+}
+
+// Инициализация при загрузке страницы
+// document.addEventListener('DOMContentLoaded', function() {
+//     // Сохраняем исходные значения для сброса формы
+//     window.lastSavedTeamData = {
+//         name: '{{ team.name }}',
+//         description: '{{ team.description|default:"" }}'
+//     };
+    
+//     // Добавляем валидацию в реальном времени
+//     const nameInput = document.getElementById('teamName');
+//     if (nameInput) {
+//         nameInput.addEventListener('input', function() {
+//             const name = this.value.trim();
+//             const resultDiv = document.getElementById('teamEditResult');
+            
+//             if (name.length > 100) {
+//                 showTeamEditResult('Название команды не может превышать 100 символов', 'error');
+//             } else if (name.length < 2 && name.length > 0) {
+//                 showTeamEditResult('Название команды должно содержать минимум 2 символа', 'error');
+//             } else {
+//                 resultDiv.style.display = 'none';
+//             }
+//         });
+//     }
+// });
 
 // Управление модальным окном
 function openManagement() {

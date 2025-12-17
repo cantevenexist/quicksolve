@@ -67,7 +67,7 @@
         {% for notification in recent_notifications %}
             <div onclick="openNotification({{ notification.id }})" 
                     class="notification-item {% if not notification.is_read %}notification-unread{% else %}notification-read{% endif %}">
-                <div>{{ notification.message }}</div>
+                <div style="text-indent: 0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;">{{ notification.message }}</div>
                 <small style="color: #666;">{{ notification.created_at|date:"d.m.Y H:i" }}</small>
             </div>
         {% empty %}
@@ -93,7 +93,7 @@
                 <button onclick="closeNotification()" style="background: none; border: none; cursor: pointer; font-size: 18px;">×</button>
             </div>
             <div style="padding: 20px;">
-                <div id="notificationModalContent" style="line-height: 1.5;"></div>
+                <div id="notificationModalContent" style="text-indent: 0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;"></div>
                 <div id="notificationModalTime" style="margin-top: 15px; font-size: 12px; color: #666; text-align: right;"></div>
                 <div id="notificationModalUrl" style="margin-top: 15px; text-align: center;"></div>
             </div>
@@ -176,11 +176,9 @@
                 data.notifications.forEach(notification => {
                     const div = document.createElement('div');
                     div.className = `notification-item ${notification.is_read ? 'notification-read' : 'notification-unread'}`;
+                    div.style=`text-indent: 0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;`;
                     div.setAttribute('onclick', `openNotification(${notification.id})`);
-                    div.innerHTML = `
-                        <div>${notification.message}</div>
-                        <small style="color: #666;">${notification.created_at}</small>
-                    `;
+                    div.innerHTML = `<div>${notification.message}</div><small style="color: #666;">${notification.created_at}</small>`;
                     container.appendChild(div);
                 });
             })

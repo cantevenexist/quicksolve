@@ -4,15 +4,23 @@ from . import views
 app_name = 'workspace'
 
 urlpatterns = [
-    # === WORKSPACE ===
+    # === WORKSPACES ===
     path('', views.WorkspaceIndexView.as_view(), name='workspace_index'),
     path('create/', views.WorkspaceCreateView.as_view(), name='workspace_create'),
     path('<str:workspace_url_hash>/', views.WorkspaceDetailView.as_view(), name='workspace_detail'),
+    path('<str:workspace_url_hash>/edit/', views.WorkspaceEditView.as_view(), name='workspace_edit'),
+    path('<str:workspace_url_hash>/delete/', views.WorkspaceDeleteView.as_view(), name='workspace_delete'),
+    path('<str:workspace_url_hash>/transfer-owner/', views.WorkspaceTransferOwnerRoleView.as_view(), name='workspace_transfer_owner'),
     
     # === TEAMS ===
     path('<str:workspace_url_hash>/team/create/', views.TeamCreateView.as_view(), name='team_create'),
     path('<str:workspace_url_hash>/team/<str:team_url_hash>/', views.TeamDetailView.as_view(), name='team_detail'),
-    
+    path('<str:workspace_url_hash>/teams/<str:team_url_hash>/edit/', views.TeamEditView.as_view(), name='team_edit'),
+    path('<str:workspace_url_hash>/teams/<str:team_url_hash>/delete/', views.TeamDeleteView.as_view(), name='team_delete'),
+    path('<str:workspace_url_hash>/team/<str:team_url_hash>/join/', views.TeamJoinView.as_view(), name='team_join'),
+    path('<str:workspace_url_hash>/team/<str:team_url_hash>/leave/', views.TeamLeaveView.as_view(), name='team_leave'),
+    path('<str:workspace_url_hash>/teams/<str:team_url_hash>/transfer-leader/', views.TeamTransferLeaderRoleView.as_view(), name='team_transfer_leader'),
+
     # === TASKS ===
     path('<str:workspace_url_hash>/tasks/', views.TaskListView.as_view(), name='task_list'),
     path('<str:workspace_url_hash>/task/create/', views.TaskCreateView.as_view(), name='task_create'),
@@ -38,10 +46,4 @@ urlpatterns = [
     path('<str:workspace_url_hash>/access-settings/get/', views.GetWorkspaceAccessView.as_view(), name='get_workspace_access_settings'),
     path('<str:workspace_url_hash>/team/<str:team_url_hash>/access-settings/save/', views.SaveTeamAccessSettingsView.as_view(), name='save_team_access_settings'),
     path('<str:workspace_url_hash>/<str:team_url_hash>/access-settings/get/', views.GetTeamAccessView.as_view(), name='get_team_access_settings'),
-
-    # === JOIN, LEAVE, TRANSFER LEADER, DELETE TEAM ===
-    path('<str:workspace_url_hash>/team/<str:team_url_hash>/join/', views.TeamJoinView.as_view(), name='team_join'),
-    path('<str:workspace_url_hash>/team/<str:team_url_hash>/leave/', views.TeamLeaveView.as_view(), name='team_leave'),
-    path('<str:workspace_url_hash>/teams/<str:team_url_hash>/transfer-leader/', views.TeamTransferLeaderRoleView.as_view(), name='team_transfer_leader'),
-    path('<str:workspace_url_hash>/teams/<str:team_url_hash>/delete/', views.TeamDeleteView.as_view(), name='team_delete'),
 ]

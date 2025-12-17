@@ -69,7 +69,7 @@
         <!-- Контент -->
         <div style="width: 70%; padding-left: 20px;">
             <!-- Главное - доступно всем, но редактирование только с правами -->
-            <div id="contentMain" style="display: block;">
+            <!-- <div id="contentMain" style="display: block;">
                 <h3>Основные настройки</h3>
                 
                 {% if can_edit_workspace %}
@@ -89,6 +89,91 @@
                     <p><strong>Название:</strong> {{ workspace.name }}</p>
                     <p><strong>Описание:</strong> {{ workspace.description|default:"Не указано" }}</p>
                     <p style="color: #666; font-style: italic;">Для изменения настроек обратитесь к администратору рабочей области</p>
+                </div>
+                {% endif %}
+            </div> -->
+            
+            <!-- Блок настроек рабочей области (например, в модальном окне или отдельной вкладке) -->
+            <div id="contentMain" style="display: block">
+                <h3>Основные настройки</h3>
+                
+                {% if can_edit_workspace %}
+                <div id="workspaceMainFormContainer">
+                    <form id="workspaceMainForm" onsubmit="event.preventDefault(); saveWorkspaceMainSettings();">
+                        <div style="margin-bottom: 20px;">
+                            <label for="workspaceName" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Название рабочей области:
+                            </label>
+                            <input type="text" 
+                                id="workspaceName" 
+                                value="{{ workspace.name }}" 
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 14px;"
+                                placeholder="Введите название рабочей области"
+                                maxlength="255"
+                                required>
+                            <!-- <p style="color: #666; font-size: 13px; margin-top: 5px;">
+                                Минимум 2 символа, максимум 100 символов
+                            </p> -->
+                        </div>
+                        
+                        <div style="margin-bottom: 25px;">
+                            <label for="workspaceDescription" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Описание рабочей области:
+                            </label>
+                            <textarea id="workspaceDescription" 
+                                    style="width: 100%; height: 120px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 14px; resize: vertical;"
+                                    placeholder="Опишите цели и задачи рабочей области (необязательно)"
+                                    maxlength="255">{{ workspace.description|default:'' }}</textarea>
+                            <p style="color: #666; font-size: 13px; margin-top: 5px;">
+                                Необязательное поле для дополнительной информации о рабочей области
+                            </p>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: flex-start; gap: 10px; margin-top: 25px;">
+                            <button type="submit" 
+                                    id="saveWorkspaceSettingsBtn"
+                                    style="background: #28a745; color: white; border: none; padding: 10px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; min-width: 120px;">
+                                Сохранить изменения
+                            </button>
+                            <button type="button" 
+                                    onclick="resetWorkspaceForm()"
+                                    style="background: #6c757d; color: white; border: none; padding: 10px 24px; border-radius: 4px; cursor: pointer; font-size: 14px; min-width: 120px;">
+                                Отмена
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <div id="workspaceEditResult" style="margin-top: 15px; display: none;"></div>
+                </div>
+                {% else %}
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 5px; border: 1px solid #e0e0e0;">
+                    <div style="margin-bottom: 15px;">
+                        <p style="margin: 0 0 10px 0; font-weight: bold; color: #333;">
+                            <strong>Название рабочей области:</strong>
+                        </p>
+                        <p style="margin: 0; padding: 10px; background: white; border-radius: 4px; border: 1px solid #e0e0e0;">
+                            {{ workspace.name }}
+                        </p>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <p style="margin: 0 0 10px 0; font-weight: bold; color: #333;">
+                            <strong>Описание рабочей области:</strong>
+                        </p>
+                        <div style="padding: 10px; background: white; border-radius: 4px; border: 1px solid #e0e0e0; min-height: 80px;">
+                            {% if workspace.description %}
+                                {{ workspace.description|linebreaksbr }}
+                            {% else %}
+                                <span style="color: #999; font-style: italic;">Описание не указано</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 12px; margin-top: 20px;">
+                        <p style="margin: 0; color: #856404; font-size: 14px;">
+                            <strong>⚠️ Информация:</strong> Только владелец рабочей области может изменять основные настройки
+                        </p>
+                    </div>
                 </div>
                 {% endif %}
             </div>
@@ -354,6 +439,105 @@
                         <span id="demoteSelectedCount" style="margin-left: 10px; color: #666;"></span>
                     </div>
                 </div>
+
+                <!-- Передача владельца рабочей области -->
+                <div style="margin-bottom: 30px; border-top: 2px solid #eee; padding-top: 30px;">
+                    <h4 style="margin-bottom: 20px; color: #dc3545; font-size: 18px;">Передача роли владельца</h4>
+                    
+                    <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+                        <p style="margin: 0; color: #856404; font-weight: bold;">
+                            ⚠️ Внимание:<br>Вы собираетесь передать роль владельца рабочей области другому участнику
+                        </p>
+                        <p style="margin: 5px 0 0 0; color: #856404; font-size: 14px;">
+                            После передачи вы станете администратором рабочей области и не сможете отменить это действие самостоятельно
+                        </p>
+                    </div>
+                    
+                    <form id="transferOwnerForm" style="background: #f8f9fa; padding: 20px; border-radius: 5px;">
+                        <div style="margin-bottom: 15px;">
+                            <label for="newOwnerSelect" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Выберите нового владельца рабочей области:
+                            </label>
+                            <select id="newOwnerSelect" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; background: white; font-size: 14px;">
+                                <option value="" style="color: #999;">-- Выберите участника --</option>
+                                {% for member in members %}
+                                    {% if member.user != user and member.role != 'owner' %}
+                                    <option value="{{ member.user.id }}" style="padding: 5px;">
+                                        {{ member.user }} ({{ member.get_role_display }})
+                                    </option>
+                                    {% endif %}
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <label for="ownerPasswordConfirm" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Подтвердите действие вашим паролем:
+                            </label>
+                            <input type="password" 
+                                id="ownerPasswordConfirm" 
+                                placeholder="Введите ваш пароль"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
+                                autocomplete="current-password">
+                            <p style="color: #666; font-size: 13px; margin-top: 5px;">
+                                Для передачи роли владельца необходимо подтвердить вашу личность
+                            </p>
+                        </div>
+                        
+                        <button type="button" 
+                                onclick="confirmOwnerTransfer()"
+                                style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; font-size: 16px;">
+                            Передать роль владельца
+                        </button>
+                    </form>
+                    
+                    <div id="ownerTransferResult" style="margin-top: 15px; display: none;"></div>
+                </div>
+
+                <!-- Удаление рабочей области -->
+                <div style="margin-top: 50px; padding-top: 30px; border-top: 3px solid #dc3545;">
+                    <h4 style="margin-bottom: 20px; color: #dc3545; font-size: 18px;">Удаление рабочей области</h4>
+                    
+                    <div style="background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; padding: 20px; margin-bottom: 20px;">
+                        <p style="margin: 0; color: #721c24; font-weight: bold;">
+                            ⚠️ Опасное действие: Удаление рабочей области
+                        </p>
+                        <p style="margin: 10px 0 0 0; color: #721c24; font-size: 14px;">
+                            При удалении рабочей области будут выполнены следующие действия:
+                        </p>
+                        <ul style="color: #721c24; font-size: 14px; margin: 10px 0 0 20px; padding: 0;">
+                            <li>Все команды и их участники будут удалены ({{ teams.count }} команд)</li>
+                            <li>Все задачи во всех командах будут удалены ({{ tasks.count }} задач)</li>
+                            <li>Все приглашения будут отменены</li>
+                            <li>Все настройки доступа будут удалены</li>
+                            <li>Все участники будут уведомлены об удалении</li>
+                            <li>Это действие нельзя отменить</li>
+                        </ul>
+                    </div>
+                    
+                    <form id="deleteWorkspaceForm" style="background: #f8f9fa; padding: 20px; border-radius: 5px;">
+                        <div style="margin-bottom: 20px;">
+                            <label for="deletePasswordConfirm" style="display: block; margin-bottom: 8px; font-weight: bold; color: #333;">
+                                Для подтверждения удаления введите ваш пароль:
+                            </label>
+                            <input type="password" 
+                                id="deletePasswordConfirm" 
+                                placeholder="Введите ваш пароль"
+                                style="width: 100%; padding: 10px; border: 1px solid #dc3545; border-radius: 4px; font-size: 14px;"
+                                autocomplete="current-password">
+                            <p style="color: #666; font-size: 13px; margin-top: 5px;">
+                                Это действие требует подтверждения вашей личности как владельца рабочей области
+                            </p>
+                        </div>
+                        
+                        <button type="button" 
+                                onclick="confirmWorkspaceDelete()"
+                                style="background: #dc3545; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; font-size: 16px;">
+                            Удалить рабочую область
+                        </button>
+                    </form>
+                    <div id="deleteWorkspaceResult" style="margin-top: 15px; display: none;"></div>
+                </div>
             </div>
             {% endif %}
 
@@ -570,6 +754,89 @@
         </button>
     </div>
 </div>
+
+<!-- Модальное окно подтверждения передачи владельца -->
+<div id="confirmOwnerTransferModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1002;">
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 8px; padding: 30px; width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); z-index: 1003;">
+        <h3 style="margin-top: 0; color: #dc3545; margin-bottom: 15px;">
+            ⚠️ Подтверждение передачи владельца
+        </h3>
+        
+        <div id="ownerTransferConfirmMessage" style="margin-bottom: 20px; line-height: 1.5; color: #333;">
+            <p style="margin-bottom: 10px;"><strong>Вы уверены, что хотите передать роль владельца рабочей области?</strong></p>
+            <p style="color: #666; font-size: 14px; margin-top: 10px;">
+                После передачи:
+                <ul style="color: #666; font-size: 13px; padding-left: 20px; margin: 10px 0;">
+                    <li>Новый владелец получит полный контроль над рабочей областью</li>
+                    <li>Вы станете администратором рабочей области</li>
+                    <li>Это действие не может быть отменено автоматически</li>
+                    <li>Все участники будут уведомлены об изменении владельца</li>
+                </ul>
+            </p>
+        </div>
+        
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px;">
+            <button type="button" 
+                    onclick="closeOwnerTransferModal()"
+                    style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Отмена
+            </button>
+            <button type="button" 
+                    onclick="transferOwnerRole()"
+                    style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                Подтвердить передачу
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения удаления рабочей области -->
+<div id="confirmDeleteWorkspaceModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1002;">
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 8px; padding: 30px; width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1003;">
+        <h3 style="margin-top: 0; color: #dc3545; margin-bottom: 15px; border-bottom: 2px solid #f5c6cb; padding-bottom: 10px;">
+            ⚠️ Подтверждение удаления рабочей области
+        </h3>
+        
+        <div id="deleteWorkspaceConfirmMessage" style="margin-bottom: 20px; line-height: 1.5; color: #333;">
+            <p style="margin-bottom: 15px; font-weight: bold; color: #721c24;">
+                Вы собираетесь удалить рабочую область <strong>"{{ workspace.name }}"</strong>
+            </p>
+            
+            <div style="background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; padding: 15px; margin-bottom: 15px;">
+                <p style="margin: 0 0 10px 0; color: #721c24; font-weight: bold;">
+                    Это действие приведет к:
+                </p>
+                <ul style="color: #721c24; margin: 0; padding-left: 20px;">
+                    <li>Удалению всех команд ({{ teams.count }} команд)</li>
+                    <li>Удалению всех задач ({{ tasks.count }} задач)</li>
+                    <li>Удалению всех участников из рабочей области</li>
+                    <li>Удалению всех приглашений и настроек доступа</li>
+                    <li>Все участники будут уведомлены об удалении</li>
+                    <li style="font-weight: bold;">Это действие нельзя отменить!</li>
+                </ul>
+            </div>
+            
+            <p style="color: #856404; font-size: 14px; background: #fff3cd; padding: 10px; border-radius: 4px;">
+                <strong>Внимание:</strong> Все данные будут безвозвратно удалены. 
+                Убедитесь, что вы сохранили необходимую информацию.
+            </p>
+        </div>
+        
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px; border-top: 1px solid #eee; padding-top: 20px;">
+            <button type="button" 
+                    onclick="closeDeleteWorkspaceModal()"
+                    style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; min-width: 100px;">
+                Отмена
+            </button>
+            <button type="button" 
+                    onclick="deleteWorkspace()"
+                    id="confirmDeleteWorkspaceBtn"
+                    style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; min-width: 100px;">
+                Удалить
+            </button>
+        </div>
+    </div>
+</div>
 {% endif %}
 
 <script>
@@ -664,34 +931,585 @@ function updateCheckboxState(settings) {
 }
 
 // Сохранение основных настроек рабочей области
+// Функция для сохранения основных настроек рабочей области
 function saveWorkspaceMainSettings() {
-    const name = document.getElementById('workspaceName').value;
-    const description = document.getElementById('workspaceDescription').value;
+    const name = document.getElementById('workspaceName').value.trim();
+    const description = document.getElementById('workspaceDescription').value.trim();
+    const saveBtn = document.getElementById('saveWorkspaceSettingsBtn');
+
+    // Валидация на клиенте
+    if (!name) {
+        showWorkspaceEditResult('Название рабочей области не может быть пустым', 'error');
+        return;
+    }
+
+    if (name.length > 255) {
+        showWorkspaceEditResult('Название рабочей области не может превышать 255 символов', 'error');
+        return;
+    }
+
+    if (description.length > 255) {
+        showWorkspaceEditResult('Описание рабочей области не может превышать 255 символов', 'error');
+        return;
+    }
+
+    // Показываем индикатор загрузки
+    const originalBtnText = saveBtn.textContent;
+    saveBtn.textContent = 'Сохранение...';
+    saveBtn.disabled = true;
+    saveBtn.style.opacity = '0.7';
+    saveBtn.style.cursor = 'wait';
     
     const formData = new FormData();
     formData.append('name', name);
     formData.append('description', description);
     formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
     
-    // Нужно создать соответствующий URL в urls.py и view
-    fetch(`{% url 'workspace:workspace_index' %}`, {
+    fetch(`{% url 'workspace:workspace_edit' workspace.url_hash %}`, {
         method: 'POST',
         body: formData,
-        headers: {'X-Requested-With': 'XMLHttpRequest'}
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
-            alert('Настройки успешно сохранены');
-            location.reload();
+            // Показываем успешное сообщение
+            let successMessage = data.message;
+            
+            if (data.changes && data.changes.length > 0) {
+                successMessage += '<br><br><strong>Изменения:</strong><br>';
+                successMessage += data.changes.map(change => `• ${change}`).join('<br>');
+            }
+            
+            showWorkspaceEditResult(successMessage, 'success');
+            
+            // Обновляем заголовок страницы
+            const pageTitle = document.querySelector('h1');
+            if (pageTitle) {
+                pageTitle.textContent = data.workspace.name;
+            }
+            
+            // Обновляем хлебные крошки, если они есть
+            const breadcrumbs = document.querySelectorAll('.breadcrumb-item');
+            if (breadcrumbs.length > 0) {
+                breadcrumbs[breadcrumbs.length - 1].textContent = data.workspace.name;
+            }
+            
+            // Сохраняем новые значения для сброса формы
+            window.lastSavedWorkspaceData = {
+                name: data.workspace.name,
+                description: data.workspace.description || ''
+            };
+            
+            // Обновляем страницу через 3 секунды
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+            
         } else {
-            alert('Ошибка при сохранении: ' + (data.error || 'Неизвестная ошибка'));
+            // Показываем ошибку
+            showWorkspaceEditResult(data.error || 'Произошла ошибка при сохранении', 'error');
+            saveBtn.textContent = originalBtnText;
+            saveBtn.disabled = false;
+            saveBtn.style.opacity = '1';
+            saveBtn.style.cursor = 'pointer';
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('Ошибка при сохранении настроек');
+        showWorkspaceEditResult('Произошла ошибка при отправке запроса', 'error');
+        saveBtn.textContent = originalBtnText;
+        saveBtn.disabled = false;
+        saveBtn.style.opacity = '1';
+        saveBtn.style.cursor = 'pointer';
     });
+}
+
+// Функция для сброса формы к исходным значениям
+function resetWorkspaceForm() {
+    const nameInput = document.getElementById('workspaceName');
+    const descriptionInput = document.getElementById('workspaceDescription');
+    
+    if (window.lastSavedWorkspaceData) {
+        // Если есть сохраненные данные, используем их
+        nameInput.value = window.lastSavedWorkspaceData.name;
+        descriptionInput.value = window.lastSavedWorkspaceData.description;
+    } else {
+        // Иначе используем исходные значения со страницы
+        nameInput.value = '{{ workspace.name }}';
+        descriptionInput.value = '{{ workspace.description|default:"" }}';
+    }
+    
+    // Скрываем результат
+    document.getElementById('workspaceEditResult').style.display = 'none';
+}
+
+// Функция для показа результатов редактирования рабочей области
+function showWorkspaceEditResult(content, type) {
+    const resultDiv = document.getElementById('workspaceEditResult');
+    
+    // Если content - это HTML, используем innerHTML, иначе создаем текстовый элемент
+    if (typeof content === 'string' && content.includes('<')) {
+        resultDiv.innerHTML = content;
+    } else {
+        resultDiv.innerHTML = `
+            <div style="padding: 12px; border-radius: 4px; background: ${type === 'success' ? '#d4edda' : '#f8d7da'}; color: ${type === 'success' ? '#155724' : '#721c24'}; border: 1px solid ${type === 'success' ? '#c3e6cb' : '#f5c6cb'};">
+                ${content}
+            </div>
+        `;
+    }
+    
+    resultDiv.style.display = 'block';
+    resultDiv.style.animation = 'fadeIn 0.3s ease-out';
+    
+    // Автоматически скрываем сообщения об ошибках через 8 секунд
+    if (type === 'error') {
+        setTimeout(() => {
+            resultDiv.style.opacity = '0';
+            resultDiv.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+                resultDiv.style.opacity = '1';
+            }, 500);
+        }, 8000);
+    }
+}
+
+// Инициализация при загрузке страницы
+// document.addEventListener('DOMContentLoaded', function() {
+//     // Сохраняем исходные значения для сброса формы
+//     if (document.getElementById('workspaceName')) {
+//         window.lastSavedWorkspaceData = {
+//             name: '{{ workspace.name }}',
+//             description: '{{ workspace.description|default:"" }}'
+//         };
+//     }
+    
+//     // Добавляем валидацию в реальном времени
+//     const nameInput = document.getElementById('workspaceName');
+//     if (nameInput) {
+//         nameInput.addEventListener('input', function() {
+//             const name = this.value.trim();
+//             const resultDiv = document.getElementById('workspaceEditResult');
+            
+//             if (name.length > 100) {
+//                 showWorkspaceEditResult('Название рабочей области не может превышать 100 символов', 'error');
+//             } else if (name.length < 2 && name.length > 0) {
+//                 showWorkspaceEditResult('Название рабочей области должно содержать минимум 2 символа', 'error');
+//             } else {
+//                 resultDiv.style.display = 'none';
+//             }
+//         });
+//     }
+// });
+
+// Передача владельца рабочей области
+function confirmOwnerTransfer() {
+    const newOwnerSelect = document.getElementById('newOwnerSelect');
+    const passwordInput = document.getElementById('ownerPasswordConfirm');
+    
+    // Валидация на клиенте
+    if (!newOwnerSelect || !newOwnerSelect.value) {
+        showOwnerTransferResult('Пожалуйста, выберите нового владельца рабочей области', 'error');
+        return;
+    }
+    
+    if (!passwordInput || !passwordInput.value.trim()) {
+        showOwnerTransferResult('Для подтверждения необходимо ввести ваш пароль', 'error');
+        return;
+    }
+    
+    // Получаем информацию о выбранном владельце
+    const selectedOption = newOwnerSelect.options[newOwnerSelect.selectedIndex];
+    const newOwnerName = selectedOption.text.split(' (')[0];
+    
+    // Обновляем текст в модальном окне
+    const messageDiv = document.getElementById('ownerTransferConfirmMessage');
+    messageDiv.innerHTML = `
+        <div style="margin-bottom: 15px;">
+            <p style="margin-bottom: 10px;">
+                Вы собираетесь передать роль владельца рабочей области пользователю:
+            </p>
+            <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; margin: 10px 0; border-left: 4px solid #dc3545;">
+                <strong>${newOwnerName}</strong>
+            </div>
+            <p style="color: #666; font-size: 14px;">
+                После подтверждения:
+                <ul style="color: #666; font-size: 13px; margin: 8px 0 8px 20px;">
+                    <li>Вы станете администратором рабочей области</li>
+                    <li>Новый владелец получит полный контроль над рабочей областью</li>
+                    <li>Все участники будут уведомлены об изменении владельца</li>
+                    <li>Это действие нельзя отменить</li>
+                </ul>
+            </p>
+        </div>
+    `;
+    
+    // Показываем модальное окно
+    document.getElementById('confirmOwnerTransferModal').style.display = 'block';
+}
+
+function closeOwnerTransferModal() {
+    document.getElementById('confirmOwnerTransferModal').style.display = 'none';
+    // Очищаем поле пароля для безопасности
+    const passwordInput = document.getElementById('ownerPasswordConfirm');
+    if (passwordInput) {
+        passwordInput.value = '';
+    }
+}
+
+function transferOwnerRole() {
+    const newOwnerSelect = document.getElementById('newOwnerSelect');
+    const passwordInput = document.getElementById('ownerPasswordConfirm');
+    
+    // Проверяем введенные данные
+    if (!newOwnerSelect || !newOwnerSelect.value) {
+        showOwnerTransferResult('Пожалуйста, выберите нового владельца рабочей области', 'error');
+        return;
+    }
+    
+    if (!passwordInput || !passwordInput.value.trim()) {
+        showOwnerTransferResult('Для подтверждения необходимо ввести ваш пароль', 'error');
+        return;
+    }
+    
+    // Получаем выбранные данные
+    const newOwnerId = newOwnerSelect.value;
+    const password = passwordInput.value;
+    
+    // Показываем индикатор загрузки
+    const confirmBtn = document.querySelector('#confirmOwnerTransferModal button[onclick="transferOwnerRole()"]');
+    const originalBtnText = confirmBtn.textContent;
+    confirmBtn.textContent = 'Обработка...';
+    confirmBtn.disabled = true;
+    confirmBtn.style.opacity = '0.7';
+    confirmBtn.style.cursor = 'wait';
+    
+    // Создаем FormData для отправки
+    const formData = new FormData();
+    formData.append('new_owner_id', newOwnerId);
+    formData.append('password', password);
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    // Отправляем AJAX запрос
+    fetch(`{% url 'workspace:workspace_transfer_owner' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => {
+        // Проверяем статус ответа
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Закрываем модальное окно
+        closeOwnerTransferModal();
+        
+        if (data.success) {
+            // Обрабатываем успешный ответ
+            handleSuccessfulOwnerTransfer(data);
+        } else {
+            // Обрабатываем ошибку
+            handleOwnerTransferError(data);
+        }
+    })
+    .catch(error => {
+        console.error('Ошибка при передаче владельца:', error);
+        closeOwnerTransferModal();
+        
+        showOwnerTransferResult(
+            'Произошла ошибка при отправке запроса. Пожалуйста, попробуйте еще раз.', 
+            'error'
+        );
+        
+        // Восстанавливаем кнопку
+        confirmBtn.textContent = originalBtnText;
+        confirmBtn.disabled = false;
+        confirmBtn.style.opacity = '1';
+        confirmBtn.style.cursor = 'pointer';
+    });
+}
+
+// Обработка успешной передачи владельца
+function handleSuccessfulOwnerTransfer(responseData) {
+    const data = responseData.data;
+    
+    // Формируем подробное сообщение об успехе
+    const successMessage = `
+        <div style="padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724;">
+            <div style="font-weight: bold; margin-bottom: 10px; font-size: 16px;">
+                ✅ ${responseData.message}
+            </div>
+            <div style="font-size: 14px;">
+                <p style="margin: 5px 0;">
+                    <strong>Новый владелец:</strong> ${data.new_owner.full_name} (@${data.new_owner.username})
+                </p>
+                <p style="margin: 5px 0;">
+                    <strong>Ваша новая роль:</strong> ${data.current_user.role_display}
+                </p>
+                <p style="margin: 5px 0; font-size: 13px; color: #0c5460;">
+                    Страница будет автоматически обновлена...
+                </p>
+            </div>
+        </div>
+    `;
+    
+    // Показываем сообщение
+    showOwnerTransferResult(successMessage, 'success');
+    
+    // Обновляем страницу через 3 секунды
+    setTimeout(() => {
+        window.location.reload();
+    }, 3000);
+}
+
+// Обработка ошибки при передаче владельца
+function handleOwnerTransferError(errorData) {
+    // Формируем сообщение об ошибке
+    const errorMessage = `
+        <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; color: #721c24;">
+            <div style="font-weight: bold; margin-bottom: 5px; font-size: 16px;">
+                ❌ ${errorData.error}
+            </div>
+            ${errorData.debug_info ? 
+                `<div style="margin-top: 10px; padding: 8px; background: #f1f1f1; border-radius: 3px; font-size: 12px; color: #721c24;">
+                    <strong>Отладочная информация:</strong><br>
+                    ${errorData.debug_info}
+                </div>` 
+                : ''
+            }
+        </div>
+    `;
+    
+    // Показываем сообщение об ошибке
+    showOwnerTransferResult(errorMessage, 'error');
+    
+    // Восстанавливаем кнопку в модальном окне
+    const confirmBtn = document.querySelector('#confirmOwnerTransferModal button[onclick="transferOwnerRole()"]');
+    if (confirmBtn) {
+        confirmBtn.textContent = 'Подтвердить передачу';
+        confirmBtn.disabled = false;
+        confirmBtn.style.opacity = '1';
+        confirmBtn.style.cursor = 'pointer';
+    }
+}
+
+// Функция для показа результатов передачи владельца
+function showOwnerTransferResult(content, type) {
+    const resultDiv = document.getElementById('ownerTransferResult');
+    
+    // Если content - это HTML, используем innerHTML, иначе создаем текстовый элемент
+    if (typeof content === 'string' && content.includes('<')) {
+        resultDiv.innerHTML = content;
+    } else {
+        resultDiv.innerHTML = `
+            <div style="padding: 12px; border-radius: 4px; background: ${type === 'success' ? '#d4edda' : '#f8d7da'}; color: ${type === 'success' ? '#155724' : '#721c24'}; border: 1px solid ${type === 'success' ? '#c3e6cb' : '#f5c6cb'};">
+                ${content}
+            </div>
+        `;
+    }
+    
+    resultDiv.style.display = 'block';
+    resultDiv.style.animation = 'fadeIn 0.3s ease-out';
+    
+    // Автоматически скрываем сообщения об ошибках через 8 секунд
+    if (type === 'error') {
+        setTimeout(() => {
+            resultDiv.style.opacity = '0';
+            resultDiv.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+                resultDiv.style.opacity = '1';
+            }, 500);
+        }, 8000);
+    }
+}
+
+// Удаление рабочей области
+function confirmWorkspaceDelete() {
+    const passwordInput = document.getElementById('deletePasswordConfirm');
+    if (!passwordInput || !passwordInput.value.trim()) {
+        showWorkspaceDeleteResult('Для подтверждения удаления необходимо ввести ваш пароль', 'error');
+        return;
+    }
+    
+    // Показываем модальное окно подтверждения
+    document.getElementById('confirmDeleteWorkspaceModal').style.display = 'block';
+}
+
+function closeDeleteWorkspaceModal() {
+    document.getElementById('confirmDeleteWorkspaceModal').style.display = 'none';
+    // Очищаем поле пароля для безопасности
+    const passwordInput = document.getElementById('deletePasswordConfirm');
+    if (passwordInput) {
+        passwordInput.value = '';
+    }
+}
+
+function deleteWorkspace() {
+    // Показываем индикатор загрузки
+    const confirmBtn = document.getElementById('confirmDeleteWorkspaceBtn');
+    const originalBtnText = confirmBtn.textContent;
+    confirmBtn.textContent = 'Удаление...';
+    confirmBtn.disabled = true;
+    confirmBtn.style.opacity = '0.7';
+    confirmBtn.style.cursor = 'wait';
+    
+    // Получаем пароль
+    const passwordInput = document.getElementById('deletePasswordConfirm');
+    const password = passwordInput ? passwordInput.value.trim() : '';
+    
+    // Создаем FormData для отправки
+    const formData = new FormData();
+    formData.append('password', password);
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+    
+    // Отправляем AJAX запрос
+    fetch(`{% url 'workspace:workspace_delete' workspace.url_hash %}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => {
+        // Проверяем статус ответа
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Закрываем модальное окно
+        closeDeleteWorkspaceModal();
+        
+        if (data.success) {
+            // Показываем успешное сообщение
+            const successMessage = `
+                <div style="padding: 20px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; color: #155724;">
+                    <div style="font-weight: bold; margin-bottom: 10px; font-size: 16px;">
+                        ✅ ${data.message}
+                    </div>
+                    <div style="font-size: 14px;">
+                        <p style="margin: 5px 0;">
+                            <strong>Рабочая область:</strong> ${data.stats.workspace_name}
+                        </p>
+                        <p style="margin: 5px 0;">
+                            <strong>Удалено команд:</strong> ${data.stats.teams_count}
+                        </p>
+                        <p style="margin: 5px 0;">
+                            <strong>Удалено задач:</strong> ${data.stats.tasks_count}
+                        </p>
+                        <p style="margin: 5px 0;">
+                            <strong>Участников уведомлено:</strong> ${data.stats.members_count}
+                        </p>
+                        <p style="margin: 10px 0 0 0; font-size: 13px; color: #0c5460;">
+                            Перенаправление на список рабочих областей...
+                        </p>
+                    </div>
+                </div>
+            `;
+            
+            showWorkspaceDeleteResult(successMessage, 'success');
+            
+            // Перенаправляем на список рабочих областей через 3 секунды
+            setTimeout(() => {
+                if (data.redirect_url) {
+                    window.location.href = data.redirect_url;
+                } else {
+                    window.location.href = '/workspaces/';
+                }
+            }, 3000);
+            
+        } else {
+            // Обрабатываем ошибку
+            const errorMessage = `
+                <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; color: #721c24;">
+                    <div style="font-weight: bold; margin-bottom: 5px; font-size: 16px;">
+                        ❌ ${data.error}
+                    </div>
+                    ${data.debug_info ? 
+                        `<div style="margin-top: 10px; padding: 8px; background: #f1f1f1; border-radius: 3px; font-size: 12px; color: #721c24;">
+                            <strong>Отладочная информация:</strong><br>
+                            ${data.debug_info}
+                        </div>` 
+                        : ''
+                    }
+                </div>
+            `;
+            
+            showWorkspaceDeleteResult(errorMessage, 'error');
+            
+            // Восстанавливаем кнопку
+            confirmBtn.textContent = originalBtnText;
+            confirmBtn.disabled = false;
+            confirmBtn.style.opacity = '1';
+            confirmBtn.style.cursor = 'pointer';
+        }
+    })
+    .catch(error => {
+        console.error('Ошибка при удалении рабочей области:', error);
+        closeDeleteWorkspaceModal();
+        
+        const errorMessage = `
+            <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; color: #721c24;">
+                <div style="font-weight: bold; margin-bottom: 5px; font-size: 16px;">
+                    ❌ Произошла ошибка при отправке запроса
+                </div>
+            </div>
+        `;
+        
+        showWorkspaceDeleteResult(errorMessage, 'error');
+        
+        // Восстанавливаем кнопку
+        confirmBtn.textContent = originalBtnText;
+        confirmBtn.disabled = false;
+        confirmBtn.style.opacity = '1';
+        confirmBtn.style.cursor = 'pointer';
+    });
+}
+
+// Функция для показа результатов удаления рабочей области
+function showWorkspaceDeleteResult(content, type) {
+    const resultDiv = document.getElementById('deleteWorkspaceResult');
+    
+    // Если content - это HTML, используем innerHTML, иначе создаем текстовый элемент
+    if (typeof content === 'string' && content.includes('<')) {
+        resultDiv.innerHTML = content;
+    } else {
+        resultDiv.innerHTML = `
+            <div style="padding: 12px; border-radius: 4px; background: ${type === 'success' ? '#d4edda' : '#f8d7da'}; color: ${type === 'success' ? '#155724' : '#721c24'}; border: 1px solid ${type === 'success' ? '#c3e6cb' : '#f5c6cb'};">
+                ${content}
+            </div>
+        `;
+    }
+    
+    resultDiv.style.display = 'block';
+    resultDiv.style.animation = 'fadeIn 0.3s ease-out';
+    
+    // Автоматически скрываем сообщения об ошибках через 8 секунд
+    if (type === 'error') {
+        setTimeout(() => {
+            resultDiv.style.opacity = '0';
+            resultDiv.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+                resultDiv.style.opacity = '1';
+            }, 500);
+        }, 8000);
+    }
 }
 
 // Сохранение настроек доступа рабочей области

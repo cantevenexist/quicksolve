@@ -18,6 +18,7 @@ class Workspace(models.Model):
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='Владелец')
     name = models.CharField(max_length=255, default='Новая рабочая область', verbose_name='Название')
+    description = models.CharField(max_length=255, blank=True, null=True)
     members = models.ManyToManyField(User, through='WorkspaceMembership', related_name='workspaces')
     url_hash = models.CharField(max_length=64, unique=True, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
@@ -252,6 +253,7 @@ class WorkspaceRoleAccess(models.Model):
 class Team(models.Model):
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
     name = models.CharField(max_length=255, default='Новая команда')
+    description = models.CharField(max_length=255, blank=True, null=True)
     members = models.ManyToManyField(User, through='TeamMembership')
     url_hash = models.CharField(max_length=64, unique=True, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)

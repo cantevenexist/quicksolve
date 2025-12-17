@@ -12,6 +12,8 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.urls import reverse
 from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.contrib.auth import authenticate
 import json
 User = get_user_model()
 from .models import Workspace, WorkspaceMembership, Team, TeamMembership, Task, IndividualInvitation, WorkspaceRoleAccess, TeamRoleAccess
@@ -150,6 +152,264 @@ class WorkspaceDetailView(LoginRequiredMixin, DetailView):
         }
         
         return context
+
+
+class WorkspaceEditView(LoginRequiredMixin, View):
+    """Представление для редактирования основных настроек рабочей области"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        workspace = get_object_or_404(
+            Workspace, 
+            url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, имеет ли пользователь право редактировать рабочую область
+        can_edit = self.check_edit_permission(request.user, workspace)
+        
+        if not can_edit:
+            return JsonResponse({
+                'success': False, 
+                'error': 'У вас нет прав для редактирования рабочей области'
+            })
+        
+        # Получаем данные из запроса
+        name = request.POST.get('name', '').strip()
+        description = request.POST.get('description', '').strip()
+        
+        # Валидация данных
+        validation_error = self.validate_workspace_data(name, description)
+        if validation_error:
+            return JsonResponse({
+                'success': False,
+                'error': validation_error
+            })
+        
+        try:
+            # Сохраняем изменения в транзакции
+            with transaction.atomic():
+                # Сохраняем старые значения для логирования
+                old_name = workspace.name
+                old_description = workspace.description
+                
+                # Обновляем данные рабочей области
+                workspace.name = name
+                workspace.description = description if description else None
+                workspace.save()
+                
+                # Логируем изменения
+                changes = []
+                if old_name != name:
+                    changes.append(f'Название: "{old_name}" → "{name}"')
+                if old_description != description:
+                    if old_description and not description:
+                        changes.append('Описание удалено')
+                    elif not old_description and description:
+                        changes.append(f'Добавлено описание')
+                    elif old_description != description:
+                        changes.append(f'Описание обновлено')
+                
+                # Создаем уведомление для пользователя
+                self.create_edit_notification(request.user, workspace, changes)
+                
+                return JsonResponse({
+                    'success': True,
+                    'message': 'Настройки рабочей области успешно обновлены',
+                    'workspace': {
+                        'id': workspace.id,
+                        'name': workspace.name,
+                        'description': workspace.description or '',
+                        'url_hash': workspace.url_hash
+                    },
+                    'changes': changes,
+                    'updated_at': timezone.now().isoformat()
+                })
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Ошибка при редактировании рабочей области: {str(e)}", exc_info=True)
+            
+            return JsonResponse({
+                'success': False,
+                'error': 'Произошла внутренняя ошибка сервера',
+                'debug_info': str(e) if settings.DEBUG else None
+            })
+    
+    def check_edit_permission(self, user, workspace):
+        """Проверяет права пользователя на редактирование команды"""
+        # Проверяем право на редактирование через TeamRoleAccess
+        workspace_access, _ = WorkspaceRoleAccess.objects.get_or_create(workspace=workspace)
+        
+        # Если у пользователя есть право can_edit_team через TeamRoleAccess
+        if workspace_access.has_permission(user, 'can_edit_team'):
+            return True
+        
+        # Проверяем, является ли пользователь владельцем workspace
+        workspace_membership = WorkspaceMembership.objects.filter(
+            workspace=workspace,
+            user=user,
+            role='owner'
+        ).first()
+        
+        if workspace_membership:
+            return True
+        
+        return False
+    
+    def validate_workspace_data(self, name, description):
+        """Валидация данных команды"""
+        if not name:
+            return 'Название команды не может быть пустым'
+        
+        if len(name) > 255:
+            return 'Название команды не может превышать 255 символов'
+        
+        if len(description) > 255:
+            return 'Описание команды не может превышать 255 символов'
+
+        return None
+    
+    def create_edit_notification(self, user, workspace, changes):
+        """Создает уведомление об изменениях рабочей области"""
+        if changes:
+            message = f'Вы обновили настройки рабочей области "{workspace.name}":\n'
+            message += '\n'.join([f'• {change}' for change in changes])
+            
+            # В реальном приложении здесь можно создать Notification
+            # Notification.objects.create(
+            #     user=user,
+            #     message=message,
+            #     level='info'
+            # )
+            
+            print(f"Уведомление для {user.username}: {message}")
+
+
+class WorkspaceDeleteView(LoginRequiredMixin, View):
+    """Представление для удаления рабочей области"""
+    
+    def post(self, request, *args, **kwargs):
+        # Проверяем AJAX запрос
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        # Получаем рабочую область
+        workspace = get_object_or_404(
+            Workspace, 
+            url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, является ли пользователь владельцем
+        if not self.check_owner_permission(request.user, workspace):
+            return JsonResponse({
+                'success': False, 
+                'error': 'Только владелец рабочей области может её удалить'
+            })
+        
+        # Получаем пароль для подтверждения
+        password = request.POST.get('password', '').strip()
+        
+        # Проверяем пароль
+        user = authenticate(username=request.user.username, password=password)
+        if not user:
+            return JsonResponse({
+                'success': False,
+                'error': 'Неверный пароль. Пожалуйста, подтвердите вашу личность'
+            })
+        
+        try:
+            # Собираем статистику перед удалением
+            stats = self.collect_deletion_stats(workspace)
+            
+            # Удаляем в транзакции
+            with transaction.atomic():
+                # Сохраняем информацию для уведомлений
+                workspace_name = workspace.name
+                workspace_id = workspace.id
+                workspace_owner = request.user
+                
+                # Удаляем рабочую область (каскадное удаление настроено в моделях)
+                workspace.delete()
+                
+                # Создаем уведомление для владельца
+                self.create_deletion_notification(request.user, workspace_name, stats)
+                
+                # Отправляем уведомления участникам
+                self.notify_workspace_members(workspace_id, workspace_name, workspace_owner)
+                
+                return JsonResponse({
+                    'success': True,
+                    'message': 'Рабочая область успешно удалена',
+                    'stats': stats,
+                    'redirect_url': '/workspace/'  # URL для перенаправления
+                })
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Ошибка при удалении рабочей области: {str(e)}", exc_info=True)
+            
+            return JsonResponse({
+                'success': False,
+                'error': 'Произошла внутренняя ошибка сервера при удалении',
+                'debug_info': str(e) if settings.DEBUG else None
+            })
+    
+    def check_owner_permission(self, user, workspace):
+        """Проверяет, является ли пользователь владельцем рабочей области"""
+        try:
+            membership = WorkspaceMembership.objects.get(
+                workspace=workspace,
+                user=user
+            )
+            return membership.role == 'owner'
+        except WorkspaceMembership.DoesNotExist:
+            return False
+    
+    def collect_deletion_stats(self, workspace):
+        """Собирает статистику перед удалением"""
+        return {
+            'workspace_name': workspace.name,
+            'teams_count': Team.objects.filter(workspace=workspace).count(),
+            'tasks_count': Task.objects.filter(team__workspace=workspace).count(),
+            'members_count': WorkspaceMembership.objects.filter(workspace=workspace).count(),
+            'created_at': workspace.created_at.strftime('%d.%m.%Y %H:%M'),
+            # 'owner': self.request.user if self.request.user else 'Не указан'
+        }
+    
+    def create_deletion_notification(self, user, workspace_name, stats):
+        """Создает уведомление об удалении рабочей области"""
+        message = f'Вы удалили рабочую область "{workspace_name}"\n\n'
+        message += f'Статистика удаления:\n'
+        message += f'• Команд: {stats["teams_count"]}\n'
+        message += f'• Задач: {stats["tasks_count"]}\n'
+        message += f'• Участников: {stats["members_count"]}\n'
+        message += f'• Дата создания: {stats["created_at"]}\n'
+        # message += f'• Владелец: {stats["owner"]}'
+        
+        Notification.objects.create(
+            user=user,
+            message=message,
+            level='warning',
+        )
+    
+    def notify_workspace_members(self, workspace_id, workspace_name, owner):
+        """Отправляет уведомления всем участникам рабочей области"""
+        # Получаем всех участников рабочей области кроме владельца
+        memberships = WorkspaceMembership.objects.filter(workspace_id=workspace_id)
+        
+        for membership in memberships:
+            if membership.user != owner:
+                message = f'Рабочая область "{workspace_name}", в которой вы участвовали, была удалена её владельцем.'
+                
+                Notification.objects.create(
+                    user=membership.user,
+                    message=message,
+                    level='info',
+                )
 
 
 class TeamCreateView(LoginRequiredMixin, CreateView):
@@ -297,6 +557,151 @@ class TeamDetailView(LoginRequiredMixin, DetailView):
         context['members_for_demotion'] = members_for_demotion    # Администраторы для разжалования
         
         return context
+
+
+class TeamEditView(LoginRequiredMixin, View):
+    """Представление для редактирования основных настроек команды"""
+    
+    def post(self, request, *args, **kwargs):
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
+        
+        team = get_object_or_404(
+            Team, 
+            url_hash=kwargs['team_url_hash'],
+            workspace__url_hash=kwargs['workspace_url_hash']
+        )
+        
+        # Проверяем, имеет ли пользователь право редактировать команду
+        can_edit = self.check_edit_permission(request.user, team)
+        
+        if not can_edit:
+            return JsonResponse({
+                'success': False, 
+                'error': 'У вас нет прав для редактирования команды'
+            })
+        
+        # Получаем данные из запроса
+        name = request.POST.get('name', '').strip()
+        description = request.POST.get('description', '').strip()
+        
+        # Валидация данных
+        validation_error = self.validate_team_data(name, description)
+        if validation_error:
+            return JsonResponse({
+                'success': False,
+                'error': validation_error
+            })
+        
+        try:
+            # Сохраняем изменения в транзакции
+            with transaction.atomic():
+                # Сохраняем старые значения для логирования
+                old_name = team.name
+                old_description = team.description
+                
+                # Обновляем данные команды
+                team.name = name
+                team.description = description if description else None
+                team.save()
+                
+                # Логируем изменения
+                changes = []
+                if old_name != name:
+                    changes.append(f'Название: "{old_name}" → "{name}"')
+                if old_description != description:
+                    if old_description and not description:
+                        changes.append('Описание удалено')
+                    elif not old_description and description:
+                        changes.append(f'Добавлено описание')
+                    elif old_description != description:
+                        changes.append(f'Описание обновлено')
+                
+                # Создаем уведомление для пользователя
+                self.create_edit_notification(request.user, team, changes)
+                
+                return JsonResponse({
+                    'success': True,
+                    'message': 'Настройки команды успешно обновлены',
+                    'team': {
+                        'id': team.id,
+                        'name': team.name,
+                        'description': team.description or '',
+                        'url_hash': team.url_hash
+                    },
+                    'changes': changes,
+                    'updated_at': timezone.now().isoformat()
+                })
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Ошибка при редактировании команды: {str(e)}", exc_info=True)
+            
+            return JsonResponse({
+                'success': False,
+                'error': 'Произошла внутренняя ошибка сервера',
+                'debug_info': str(e) if settings.DEBUG else None
+            })
+    
+    def check_edit_permission(self, user, team):
+        """Проверяет права пользователя на редактирование команды"""
+        # Проверяем право на редактирование через TeamRoleAccess
+        team_access, _ = TeamRoleAccess.objects.get_or_create(team=team)
+        
+        # Если у пользователя есть право can_edit_team через TeamRoleAccess
+        if team_access.has_permission(user, 'can_edit_team'):
+            return True
+        
+        # Проверяем, является ли пользователь лидером команды
+        team_membership = TeamMembership.objects.filter(
+            team=team,
+            user=user,
+            role='leader'
+        ).first()
+        
+        if team_membership:
+            return True
+        
+        # Проверяем, является ли пользователь владельцем workspace
+        workspace_membership = WorkspaceMembership.objects.filter(
+            workspace=team.workspace,
+            user=user,
+            role='owner'
+        ).first()
+        
+        if workspace_membership:
+            return True
+        
+        return False
+    
+    def validate_team_data(self, name, description):
+        """Валидация данных команды"""
+        if not name:
+            return 'Название команды не может быть пустым'
+        
+        if len(name) > 255:
+            return 'Название команды не может превышать 255 символов'
+        
+        if len(description) > 255:
+            return 'Описание команды не может превышать 255 символов'
+
+        return None
+    
+    def create_edit_notification(self, user, team, changes):
+        """Создает уведомление об изменениях команды"""
+        if changes:
+            message = f'Вы обновили настройки команды "{team.name}":\n'
+            message += '\n'.join([f'• {change}' for change in changes])
+            
+            # В реальном приложении здесь можно создать Notification
+            # Notification.objects.create(
+            #     user=user,
+            #     message=message,
+            #     level='info'
+            # )
+            
+            print(f"Уведомление для {user.username}: {message}")
 
 
 class TaskListView(LoginRequiredMixin, ListView):
@@ -1870,8 +2275,188 @@ class TeamLeaveView(LoginRequiredMixin, View):
                 'error': str(e)
             })
 
-from django.db import transaction
-from django.contrib.auth import authenticate
+
+class WorkspaceTransferOwnerRoleView(LoginRequiredMixin, View):
+    """Представление для передачи роли владельца рабочей области с проверкой пароля"""
+    
+    def post(self, request, *args, **kwargs):
+        # Проверяем, что это AJAX запрос
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'success': False, 
+                'error': 'Неверный тип запроса. Требуется AJAX.'
+            })
+        
+        workspace_url_hash = kwargs.get('workspace_url_hash')
+        
+        try:
+            # Получаем рабочую область
+            workspace = get_object_or_404(
+                Workspace,
+                url_hash=workspace_url_hash
+            )
+            
+            # Получаем данные из запроса
+            new_owner_id = request.POST.get('new_owner_id')
+            password = request.POST.get('password')
+            
+            # Валидация данных
+            if not new_owner_id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Не выбран новый владелец рабочей области'
+                })
+            
+            if not password:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Для подтверждения действия необходимо ввести ваш пароль'
+                })
+            
+            # Проверяем, является ли текущий пользователь владельцем рабочей области
+            try:
+                current_membership = WorkspaceMembership.objects.get(
+                    workspace=workspace,
+                    user=request.user
+                )
+                
+                if current_membership.role != 'owner':
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'Только текущий владелец может передать роль владельца'
+                    })
+            except WorkspaceMembership.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Вы не являетесь участником этой рабочей области'
+                })
+            
+            # Проверяем пароль текущего пользователя
+            user = authenticate(
+                username=request.user.username,
+                password=password
+            )
+            
+            if not user:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Неверный пароль. Проверьте правильность ввода.'
+                })
+            
+            # Проверяем, что новый владелец существует в рабочей области
+            try:
+                new_owner_membership = WorkspaceMembership.objects.select_related('user').get(
+                    workspace=workspace,
+                    user_id=new_owner_id
+                )
+            except WorkspaceMembership.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Выбранный пользователь не является участником рабочей области'
+                })
+            
+            # Проверяем, что новый владелец не является текущим пользователем
+            if new_owner_membership.user_id == request.user.id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Вы уже являетесь владельцем этой рабочей области'
+                })
+            
+            # Выполняем передачу владельца в транзакции
+            with transaction.atomic():
+                # Изменяем роль текущего владельца на администратора
+                current_membership.role = 'member'
+                current_membership.save()
+                
+                # Назначаем нового владельца
+                new_owner_membership.role = 'owner'
+                new_owner_membership.save()
+                
+                # Обновляем владельца в модели Workspace
+                workspace.owner = new_owner_membership.user
+                workspace.save()
+            
+            # Создаем уведомления для участников
+            self.create_notifications(request.user, new_owner_membership.user, workspace)
+            
+            # Получаем обновленные данные для ответа
+            updated_current_membership = WorkspaceMembership.objects.get(
+                workspace=workspace,
+                user=request.user
+            )
+            
+            # Формируем успешный ответ
+            response_data = {
+                'success': True,
+                'message': f'Роль владельца рабочей области успешно передана пользователю {new_owner_membership.user.username}',
+                'data': {
+                    'new_owner': {
+                        'id': new_owner_membership.user.id,
+                        'username': new_owner_membership.user.username,
+                        'first_name': new_owner_membership.user.first_name,
+                        'last_name': new_owner_membership.user.last_name,
+                        'full_name': f"{new_owner_membership.user.first_name} {new_owner_membership.user.last_name}".strip() or new_owner_membership.user.username,
+                        'role': 'owner'
+                    },
+                    'current_user': {
+                        'id': request.user.id,
+                        'username': request.user.username,
+                        'role': updated_current_membership.role,
+                        'role_display': updated_current_membership.get_role_display()
+                    },
+                    'workspace': {
+                        'id': workspace.id,
+                        'name': workspace.name,
+                        'url_hash': workspace.url_hash
+                    },
+                    'timestamp': timezone.now().isoformat()
+                }
+            }
+            
+            return JsonResponse(response_data)
+            
+        except Exception as e:
+            # Логируем ошибку для отладки
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Ошибка при передаче владельца рабочей области: {str(e)}", exc_info=True)
+            
+            return JsonResponse({
+                'success': False,
+                'error': 'Произошла внутренняя ошибка сервера',
+                'debug_info': str(e) if settings.DEBUG else None
+            })
+    
+    def create_notifications(self, current_owner, new_owner, workspace):
+        """Создает уведомления о передаче владельца"""
+        
+        # Уведомление для нового владельца
+        Notification.objects.create(
+            user=new_owner,
+            message=f'Вам была передана роль владельца рабочей области "{workspace.name}" от пользователя {current_owner.username}',
+            level='success',
+        )
+        
+        # Уведомление для предыдущего владельца
+        Notification.objects.create(
+            user=current_owner,
+            message=f'Вы передали роль владельца рабочей области "{workspace.name}" пользователю {new_owner.username}',
+            level='info',
+        )
+        
+        # # Уведомление для всех администраторов (опционально)
+        # admin_memberships = WorkspaceMembership.objects.filter(
+        #     workspace=workspace,
+        #     role='admin'
+        # ).exclude(user__in=[current_owner, new_owner])
+        
+        # for membership in admin_memberships:
+        #     Notification.objects.create(
+        #         user=membership.user,
+        #         message=f'Владелец рабочей области "{workspace.name}" изменился. Новый владелец: {new_owner.username}',
+        #         level='info',
+        #     )
+
 
 class TeamTransferLeaderRoleView(LoginRequiredMixin, View):
     """Представление для передачи роли лидера команды с проверкой пароля"""
