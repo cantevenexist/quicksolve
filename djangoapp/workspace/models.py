@@ -16,7 +16,7 @@ class Workspace(models.Model):
         (259200, '72 часа'),
     ]
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='Владелец')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, verbose_name='Владелец',blank=True, null=True)
     name = models.CharField(max_length=255, default='Новая рабочая область', verbose_name='Название')
     description = models.CharField(max_length=255, blank=True, null=True)
     members = models.ManyToManyField(User, through='WorkspaceMembership', related_name='workspaces')
@@ -412,9 +412,9 @@ class TeamRoleAccess(models.Model):
 
     def is_team_visible_to_user(self, user):
         """Проверяет, видна ли команда пользователю"""
-        # Владельцы и администраторы workspace всегда видят все команды
+        # Владельцы workspace всегда видят все команды
         workspace_role = self.team.workspace.get_user_role(user)
-        if workspace_role in ['owner', 'admin']:
+        if workspace_role == 'owner':
             return True
         
         # Участники команды всегда видят свою команду
@@ -551,6 +551,20 @@ class Task(models.Model):
         verbose_name='Кем обновлено'
     )
 
+    @property
+    def is_overdue(self):
+        """Проверяет, просрочена ли задача"""
+        if self.deadline and self.status != 'done':
+            return self.deadline < timezone.now()
+        return False
+    
+    @property
+    def overdue_days(self):
+        """Количество дней просрочки"""
+        if self.is_overdue:
+            return (timezone.now() - self.deadline).days
+        return 0
+    
     class Meta:
         verbose_name = 'Задача'
         verbose_name_plural = 'Задачи'

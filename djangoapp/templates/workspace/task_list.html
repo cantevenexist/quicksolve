@@ -182,7 +182,7 @@
                         <span style="color: #888;">(скрытая)</span>
                     {% endif %}
                 </td>
-                <td>{{ task.description }}</td>
+                <td style="text-indent: 0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;">{{ task.description }}</td>
                 <td>{{ task.get_status_display }}</td>
                 <td>{{ task.get_priority_display }}</td>
                 <td>
@@ -206,9 +206,11 @@
                 </td>
                 <td>
                     {% if task.deadline %}
-                        {{ task.deadline|date:"d.m.Y H:i" }}
-                        {% if task.deadline < now and task.status != 'done' %}
-                            <span style="color: red;">(просрочено)</span>
+                        <span class="utc-time" data-utc="{% if task.deadline %}{{ task.deadline.isoformat }}{% endif %}">{{ task.deadline|date:"d.m.Y H:i" }}</span>
+                        {% if task.is_overdue %}
+                            <span style="color: red;">
+                                (просрочено на {{ task.overdue_days }} дней)
+                            </span>
                         {% endif %}
                     {% else %}
                         <span style="color: #888;">Нет</span>
@@ -220,11 +222,12 @@
                         <span style="color: green;">(Вы)</span>
                     {% endif %}
                 </td>
-                <td>{{ task.created_at|date:"d.m.Y H:i" }}</td>
+                <td>
+                    <span class="utc-time" data-utc="{{ task.created_at.isoformat }}">{{ task.created_at|date:"d.m.Y H:i" }}</span></td>
                 <td>
                     {% if task.updated_by %}
                         {{ task.updated_by.username }}<br>
-                        <small>{{ task.updated_at|date:"d.m.Y H:i" }}</small>
+                        <small><span class="utc-time" data-utc="{{ task.updated_at.isoformat }}">{{ task.updated_at|date:"d.m.Y H:i" }}</span></small>
                     {% endif %}
                 </td>
                 <td>
@@ -294,5 +297,53 @@
         </div>
     </form>
 {% endif %}
+<script>
+// Функция для конвертации всех UTC времен в локальное время пользователя
+function convertAllTimes() {
+    // Находим все элементы с классом utc-time и data-utc атрибутом
+    const timeElements = document.querySelectorAll('.utc-time[data-utc]');
+    
+    timeElements.forEach(element => {
+        const utcString = element.getAttribute('data-utc');
+        if (utcString && utcString.trim() !== '') {
+            try {
+                const utcDate = new Date(utcString);
+                
+                // Форматируем дату в локальное время пользователя
+                const localDate = utcDate.toLocaleDateString('ru-RU', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
+                
+                const localTime = utcDate.toLocaleTimeString('ru-RU', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                });
+                
+                // Сохраняем оригинальный текст для восстановления при необходимости
+                if (!element.dataset.originalText) {
+                    element.dataset.originalText = element.textContent;
+                }
+                
+                // Обновляем текст элемента
+                element.textContent = `${localDate} ${localTime}`;
+                
+                // Добавляем тултип с информацией о UTC времени
+                element.title = `UTC: ${utcString.replace('T', ' ').slice(0, 16)}`;
+                
+            } catch (error) {
+                console.error('Ошибка конвертации времени:', error, 'UTC строка:', utcString);
+            }
+        }
+    });
+}
 
+// Обработка формы обновления задачи
+document.addEventListener('DOMContentLoaded', function() {
+    // При загрузке страницы конвертируем все времена из UTC в локальное
+    convertAllTimes();
+});
+</script>
 {% endblock %}
