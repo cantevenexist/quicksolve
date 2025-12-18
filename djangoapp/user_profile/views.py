@@ -63,30 +63,19 @@ class ProfileEditView(LoginRequiredMixin, View):
 class RegenerateUniqueCodeView(LoginRequiredMixin, View):
     """Представление для генерации нового уникального кода"""
     
-    def generate_unique_code(self):
-        """Генерация уникального кода"""
-        return str(uuid.uuid4())[:12].upper().replace('-', '')
-    
-    def get(self, request, *args, **kwargs):
-        # При прямом GET запросе показываем 404
-        from django.http import Http404
-        raise Http404("Page not found")
-    
     def post(self, request, *args, **kwargs):
         # Проверяем, что запрос пришел через AJAX
         if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            # Если не AJAX, показываем 404
-            from django.http import Http404
-            raise Http404("Page not found")
+            return JsonResponse({'success': False, 'error': 'Invalid request'})
         
         profile = get_object_or_404(UserProfile, user=request.user)
         
         # Генерируем новый уникальный код
-        new_code = self.generate_unique_code()
+        new_code = str(uuid.uuid4())[:12].upper().replace('-', '')
         
-        # Проверяем уникальность (на всякий случай)
+        # Проверяем уникальность
         while UserProfile.objects.filter(unique_code=new_code).exists():
-            new_code = self.generate_unique_code()
+            new_code = str(uuid.uuid4())[:12].upper().replace('-', '')
         
         # Сохраняем новый код
         old_code = profile.unique_code
@@ -96,6 +85,7 @@ class RegenerateUniqueCodeView(LoginRequiredMixin, View):
         return JsonResponse({
             'success': True,
             'new_code': profile.unique_code,
+            'message': 'Код успешно обновлен!'
         })
 
 
