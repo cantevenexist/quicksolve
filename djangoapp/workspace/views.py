@@ -376,8 +376,6 @@ class WorkspaceDeleteView(LoginRequiredMixin, View):
             'teams_count': Team.objects.filter(workspace=workspace).count(),
             'tasks_count': Task.objects.filter(team__workspace=workspace).count(),
             'members_count': WorkspaceMembership.objects.filter(workspace=workspace).count(),
-            'created_at': workspace.created_at.strftime('%d.%m.%Y %H:%M'),
-            # 'owner': self.request.user if self.request.user else 'Не указан'
         }
     
     def create_deletion_notification(self, user, workspace_name, stats):
@@ -387,8 +385,6 @@ class WorkspaceDeleteView(LoginRequiredMixin, View):
         message += f'• Команд: {stats["teams_count"]}\n'
         message += f'• Задач: {stats["tasks_count"]}\n'
         message += f'• Участников: {stats["members_count"]}\n'
-        message += f'• Дата создания: {stats["created_at"]}\n'
-        # message += f'• Владелец: {stats["owner"]}'
         
         Notification.objects.create(
             user=user,

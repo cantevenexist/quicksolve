@@ -120,7 +120,7 @@ class AllNotificationsView(LoginRequiredMixin, View):
                 'message': notification.message,
                 'level': notification.level,
                 'is_read': notification.is_read,
-                'created_at': notification.created_at.strftime("%d.%m.%Y %H:%M"),
+                'created_at': notification.created_at,
                 'related_url': notification.related_url or ''
             })
         

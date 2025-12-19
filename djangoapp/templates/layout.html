@@ -29,6 +29,12 @@
         .notification-item:hover {
             background-color: #f8f9fa !important;
         }
+        
+        .notification-time {
+            color: #666;
+            font-size: 0.85em;
+            margin-top: 4px;
+        }
     </style>
 </head>
 <body style="font-family: Geologica; margin: 0;">
@@ -68,7 +74,9 @@
             <div onclick="openNotification({{ notification.id }})" 
                     class="notification-item {% if not notification.is_read %}notification-unread{% else %}notification-read{% endif %}">
                 <div style="text-indent: 0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;">{{ notification.message }}</div>
-                <small style="color: #666;">{{ notification.created_at|date:"d.m.Y H:i" }}</small>
+                <div class="notification-time" data-timestamp="{{ notification.created_at|date:'c' }}">
+                    {{ notification.created_at|date:"d.m.Y H:i" }}
+                </div>
             </div>
         {% empty %}
             <div style="padding: 20px; text-align: center; color: #666;">Нет уведомлений</div>
@@ -108,6 +116,76 @@
     </div>
 
     <script>
+        // Функция для форматирования даты в локальное время
+        function formatLocalDateTime(dateString) {
+            if (!dateString) return '';
+            
+            try {
+                // Пытаемся разобрать дату в ISO формате или других форматах
+                let date;
+                
+                if (dateString.includes('T')) {
+                    // ISO формат с 'T'
+                    date = new Date(dateString);
+                } else if (dateString.includes(' ')) {
+                    // Формат "d.m.Y H:i" или подобный
+                    const parts = dateString.split(' ');
+                    const dateParts = parts[0].split('.');
+                    const timeParts = parts[1].split(':');
+                    
+                    if (dateParts.length === 3 && timeParts.length >= 2) {
+                        // d.m.Y H:i
+                        date = new Date(
+                            parseInt(dateParts[2]), // год
+                            parseInt(dateParts[1]) - 1, // месяц (0-based)
+                            parseInt(dateParts[0]), // день
+                            parseInt(timeParts[0]), // часы
+                            parseInt(timeParts[1]), // минуты
+                            timeParts[2] ? parseInt(timeParts[2]) : 0 // секунды
+                        );
+                    } else {
+                        // Пробуем стандартный разбор
+                        date = new Date(dateString);
+                    }
+                } else {
+                    // Пробуем стандартный разбор
+                    date = new Date(dateString);
+                }
+                
+                // Проверяем, что дата валидна
+                if (isNaN(date.getTime())) {
+                    console.warn('Invalid date:', dateString);
+                    return dateString;
+                }
+                
+                // Форматируем в локальное время
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                
+                return `${day}.${month}.${year} ${hours}:${minutes}`;
+            } catch (error) {
+                console.error('Error formatting date:', error, dateString);
+                return dateString;
+            }
+        }
+        
+        // Обновляем все временные метки на странице при загрузке
+        function updateAllLocalTimes() {
+            // В превью уведомлений
+            document.querySelectorAll('.notification-time').forEach(element => {
+                const timestamp = element.getAttribute('data-timestamp');
+                if (timestamp) {
+                    const localTime = formatLocalDateTime(timestamp);
+                    if (localTime && localTime !== timestamp) {
+                        element.textContent = localTime;
+                    }
+                }
+            });
+        }
+        
         function toggleNotifications() {
             const preview = document.getElementById('notificationsPreview');
             preview.style.display = preview.style.display === 'block' ? 'none' : 'block';
@@ -138,7 +216,10 @@
             .then(data => {
                 if (data.success) {
                     document.getElementById('notificationModalContent').textContent = data.notification.message;
-                    document.getElementById('notificationModalTime').textContent = data.notification.created_at;
+                    
+                    // Форматируем время в локальное
+                    const localTime = formatLocalDateTime(data.notification.created_at);
+                    document.getElementById('notificationModalTime').textContent = localTime;
                     
                     const urlContainer = document.getElementById('notificationModalUrl');
                     if (data.notification.related_url) {
@@ -178,7 +259,11 @@
                     div.className = `notification-item ${notification.is_read ? 'notification-read' : 'notification-unread'}`;
                     div.style=`text-indent: 0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;`;
                     div.setAttribute('onclick', `openNotification(${notification.id})`);
-                    div.innerHTML = `<div>${notification.message}</div><small style="color: #666;">${notification.created_at}</small>`;
+                    
+                    // Форматируем время в локальное
+                    const localTime = formatLocalDateTime(notification.created_at);
+                    
+                    div.innerHTML = `<div>${notification.message}</div><div class="notification-time">${localTime}</div>`;
                     container.appendChild(div);
                 });
             })
@@ -264,6 +349,11 @@
             if (e.target.id === 'notificationModal') {
                 closeNotification();
             }
+        });
+        
+        // Обновляем время при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            updateAllLocalTimes();
         });
     </script>
 </body>
