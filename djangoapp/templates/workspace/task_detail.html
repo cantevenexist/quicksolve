@@ -233,7 +233,7 @@
                     {% endif %}
                 {% else %}
                     <input type="hidden" name="deadline" value="">
-                    <p>{% if task.deadline %}{{ task.deadline|date:"d.m.Y H:i" }}{% else %}Не установлен{% endif %}</p>
+                    <p class="utc-time" data-utc="{% if task.deadline %}{{ task.deadline.isoformat }}{% endif %}">{% if task.deadline %}{{ task.deadline|date:"d.m.Y H:i" }}{% else %}Не установлен{% endif %}</p>
                     <small style="color: #666;">(У вас нет прав для изменения)</small>
                 {% endif %}
                 <small style="color: #666; display: block; margin-top: 5px;">
@@ -638,6 +638,54 @@ function updateOriginalValues(taskData) {
     }
 }
 
+// Функция для проверки изменений в правах доступа
+function checkPermissionsChanges() {
+    const checkboxes = [
+        {id: 'perm-edit-content', name: 'can_edit_content'},
+        {id: 'perm-edit-team', name: 'can_edit_team'},
+        {id: 'perm-edit-assignee', name: 'can_edit_assignee'},
+        {id: 'perm-edit-visibility', name: 'can_edit_visibility'}
+    ];
+    
+    let hasChanges = false;
+    
+    checkboxes.forEach(field => {
+        const checkbox = document.getElementById(field.id);
+        if (checkbox) {
+            const currentValue = checkbox.checked;
+            // Получаем исходное состояние из данных чекбокса
+            if (checkbox.dataset.originalValue === undefined) {
+                // Сохраняем исходное значение при первом вызове
+                checkbox.dataset.originalValue = checkbox.checked.toString();
+            }
+            
+            const originalValue = checkbox.dataset.originalValue === 'true';
+            
+            if (currentValue !== originalValue) {
+                hasChanges = true;
+                console.log(`Право ${field.name} изменилось:`, {
+                    старое: originalValue,
+                    новое: currentValue
+                });
+            }
+        }
+    });
+    
+    return hasChanges;
+}
+
+// Функция для обновления исходных значений прав доступа
+function updatePermissionsOriginalValues() {
+    const checkboxes = ['perm-edit-content', 'perm-edit-team', 'perm-edit-assignee', 'perm-edit-visibility'];
+    
+    checkboxes.forEach(id => {
+        const checkbox = document.getElementById(id);
+        if (checkbox) {
+            checkbox.dataset.originalValue = checkbox.checked.toString();
+        }
+    });
+}
+
 // Обновление информации о задаче на странице
 function updateTaskInfo(data) {
     // Обновляем заголовок
@@ -827,12 +875,20 @@ function updatePermissions(data) {
     
     const permVisibilityCheckbox = document.getElementById('perm-edit-visibility');
     if (permVisibilityCheckbox) permVisibilityCheckbox.checked = data.can_edit_visibility;
+    
+    // Обновляем исходные значения после изменения прав
+    updatePermissionsOriginalValues();
 }
 
 // Обработка формы обновления задачи
 document.addEventListener('DOMContentLoaded', function() {
     // При загрузке страницы конвертируем все времена из UTC в локальное
     convertAllTimes();
+    
+    // Инициализируем исходные значения прав доступа
+    if (document.getElementById('update-permissions-form')) {
+        updatePermissionsOriginalValues();
+    }
     
     const updateTaskForm = document.getElementById('update-task-form');
     if (updateTaskForm) {
@@ -1035,6 +1091,12 @@ document.addEventListener('DOMContentLoaded', function() {
     if (updatePermissionsForm) {
         updatePermissionsForm.addEventListener('submit', function(e) {
             e.preventDefault();
+            
+            // Проверяем, были ли изменения
+            if (!checkPermissionsChanges()) {
+                showMessage('Нет изменений в настройках прав доступа для сохранения', 'info');
+                return;
+            }
             
             // Удаляем скрытые поля, если чекбокс отмечен
             const formData = new FormData(this);
